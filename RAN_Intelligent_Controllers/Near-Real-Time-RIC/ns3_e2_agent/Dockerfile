@@ -6,8 +6,9 @@
 #   - nlohmann-json comes from the Ubuntu 22.04 package (nlohmann-json3-dev)
 #     instead of an unpinned git clone of a third-party repository;
 #   - only the build tools are installed (no editors or network tools);
-#   - the agent is the ENTRYPOINT (PID 1 under `docker run --init`), so the
-#     Docker restart policy sees its exits; NIST's image idles on CMD sleep.
+#   - the agent is the ENTRYPOINT (the child of docker-init under
+#     `docker run --init`), so the Docker restart policy sees its exits;
+#     NIST's image idles on CMD sleep and runs kpm_sim through docker exec.
 #   - the metric map is copied to /etc/ns3-e2-agent/.
 #
 # Build (from e2-interface/e2sim, see install_scripts/install_ns3_e2_agent.sh):
