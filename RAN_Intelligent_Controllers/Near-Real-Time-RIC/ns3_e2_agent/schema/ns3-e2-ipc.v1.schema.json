@@ -68,8 +68,10 @@
         "du": { "$ref": "#/$defs/section" },
         "cuUp": { "$ref": "#/$defs/section" },
         "cuCp": {
-          "allOf": [{ "$ref": "#/$defs/section" }],
-          "properties": { "l3": { "$ref": "#/$defs/l3" } }
+          "type": "object",
+          "description": "A section (values keyed by ns-3 name) plus the l3 object. additionalProperties sits in this same schema so that it does not apply to l3 (inside allOf it would reject l3).",
+          "properties": { "l3": { "$ref": "#/$defs/l3" } },
+          "additionalProperties": { "$ref": "#/$defs/value" }
         }
       }
     },
