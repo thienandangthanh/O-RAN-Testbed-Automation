@@ -39,6 +39,13 @@ if ! command -v realpath &>/dev/null; then
     echo "Package \"coreutils\" not found, installing..."
     sudo env $APTVARS apt-get install -y coreutils
 fi
+# Modified 2026-10-21 (ns-O-RAN L-release port): the install-duration report at
+# the end uses bc(1), which Ubuntu 24.04 server images do not ship; under set -e
+# its absence made a successful install exit non-zero.
+if ! command -v bc &>/dev/null; then
+    echo "Package \"bc\" not found, installing..."
+    sudo env $APTVARS apt-get install -y bc
+fi
 
 CURRENT_DIR=$(pwd)
 SCRIPT_DIR=$(dirname "$(realpath "$0")")
