@@ -27,6 +27,9 @@ class SctpAssociation {
   // One E2AP message, MSG_NOSIGNAL | MSG_DONTWAIT (stream 0, PPID 0 as NIST's e2sim).
   SendResult send(const Bytes &msg, std::string &err);
   void close();
+  // SHUTDOWN the association and wait up to timeoutMs for it to end, so e2term
+  // sees the node leave at once instead of after its heartbeat timeouts.
+  void graceful_close(int timeoutMs);
 
   int fd() const { return fd_; }
   bool connecting() const { return fd_ >= 0 && connecting_; }
