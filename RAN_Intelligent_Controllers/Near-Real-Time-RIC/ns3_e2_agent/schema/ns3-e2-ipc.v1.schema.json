@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ns3-e2-ipc.v1",
+  "title": "ns-3 to E2 agent IPC, version 1",
+  "description": "Newline-delimited JSON over TCP, one object per line, UTF-8, at most 1 MiB per line, ns-3 -> agent only in v1. ns-3 writes the identical line to its local trace before sending, so the trace is the wire. Non-finite doubles are encoded as null. Doubles use shortest round-trip decimal so values compare bit-exactly. Receivers ignore unknown keys; a new key bumps 'minor', a breaking change bumps 'v'. The types 'control', 'controlAck' and 'step' are reserved for RC and pacing (M8); v1 emitters must drain and ignore inbound bytes.",
+  "oneOf": [
+    { "$ref": "#/$defs/hello" },
+    { "$ref": "#/$defs/sample" },
+    { "$ref": "#/$defs/bye" }
+  ],
+  "$defs": {
+    "nodeId": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "ns-3 cellId of the E2 node (LTE eNB = 1, mmWave gNBs = 2..1+N in scenario-zero)." },
+    "value": { "type": ["integer", "number", "null"] },
+    "section": {
+      "type": "object",
+      "description": "Measurement values keyed by the exact name ns-3 builds today (the AddItem name, or the C++ field / CSV column name for container and file-logging-only values). The metric map (metric-map.v1.json) maps each key to a KPM measName.",
+      "additionalProperties": { "$ref": "#/$defs/value" }
+    },
+    "hello": {
+      "type": "object",
+      "required": ["type", "schema", "v", "minor", "nodeId", "kind", "periodNs", "simStartEpochMs", "runId"],
+      "properties": {
+        "type": { "const": "hello" },
+        "schema": { "const": "ns3-e2-ipc" },
+        "v": { "const": 1 },
+        "minor": { "type": "integer", "minimum": 0 },
+        "nodeId": { "$ref": "#/$defs/nodeId" },
+        "kind": { "enum": ["gnb", "enb"] },
+        "periodNs": { "type": "integer", "minimum": 1, "description": "E2Periodicity in ns (indicationPeriodicity)." },
+        "simStartEpochMs": { "type": "integer", "description": "Wall-clock epoch ms that ns-3 maps to sim time 0 (MmWaveHelper start time); the agent builds the KPM TimeStamp from it." },
+        "reducedPmValues": { "type": "boolean", "description": "Informational only; samples always carry the full set." },
+        "maxNeigh": { "type": "integer", "minimum": 0 },
+        "runId": { "type": "string" },
+        "emitter": {
+          "type": "object",
+          "properties": { "ns3Sha": { "type": "string" }, "oranInterfaceSha": { "type": "string" } }
+        }
+      },
+      "additionalProperties": true
+    },
+    "l3": {
+      "type": "object",
+      "description": "L3 RRC SINR as ns-3 computes it (mmWave CU-CP; LTE from the file-logging path).",
+      "properties": {
+        "servCellId": { "type": ["integer", "null"] },
+        "servSinrDb": { "type": ["number", "null"] },
+        "servSinr3gpp": { "type": ["integer", "null"] },
+        "neigh": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "properties": {
+              "cellId": { "type": "integer" },
+              "sinrDb": { "type": ["number", "null"] },
+              "sinr3gpp": { "type": ["integer", "null"] }
+            },
+            "required": ["cellId"]
+          }
+        }
+      }
+    },
+    "ue": {
+      "type": "object",
+      "required": ["imsi"],
+      "properties": {
+        "imsi": { "type": "integer", "minimum": 0 },
+        "du": { "$ref": "#/$defs/section" },
+        "cuUp": { "$ref": "#/$defs/section" },
+        "cuCp": {
+          "allOf": [{ "$ref": "#/$defs/section" }],
+          "properties": { "l3": { "$ref": "#/$defs/l3" } }
+        }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "required": ["type", "v", "nodeId", "seq", "simTimeNs", "ipcDropped", "cell", "ues"],
+      "properties": {
+        "type": { "const": "sample" },
+        "v": { "const": 1 },
+        "nodeId": { "$ref": "#/$defs/nodeId" },
+        "seq": { "type": "integer", "minimum": 0, "description": "0-based per run and node; incremented for every built sample, including dropped ones." },
+        "simTimeNs": { "type": "integer", "minimum": 0, "description": "Simulator time when the sample was built (end of its period)." },
+        "ipcDropped": { "type": "integer", "minimum": 0, "description": "Cumulative samples this node's emitter has dropped (agent down or backpressure)." },
+        "cell": {
+          "type": "object",
+          "properties": {
+            "du": { "$ref": "#/$defs/section" },
+            "cuUp": { "$ref": "#/$defs/section" },
+            "cuCp": { "$ref": "#/$defs/section" }
+          }
+        },
+        "ues": { "type": "array", "items": { "$ref": "#/$defs/ue" }, "description": "Sorted by imsi." }
+      },
+      "additionalProperties": true
+    },
+    "bye": {
+      "type": "object",
+      "required": ["type", "nodeId", "lastSeq", "built", "sent", "droppedDisconnected", "droppedBackpressure"],
+      "properties": {
+        "type": { "const": "bye" },
+        "nodeId": { "$ref": "#/$defs/nodeId" },
+        "lastSeq": { "type": "integer" },
+        "built": { "type": "integer" },
+        "sent": { "type": "integer" },
+        "droppedDisconnected": { "type": "integer" },
+        "droppedBackpressure": { "type": "integer" }
+      }
+    }
+  }
+}
