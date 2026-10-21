@@ -137,6 +137,9 @@ sudo env $APTVARS apt-get install -y ipvsadm
 sudo env $APTVARS apt-get install -y socat
 sudo env $APTVARS apt-get install -y libsctp1 lksctp-tools
 sudo env $APTVARS apt-get install -y jq netcat-openbsd make ipset moreutils
+# Modified 2026-10-21 (ns-O-RAN L-release port): the Helm archive check below
+# uses file(1), which Ubuntu 24.04 server images do not ship.
+sudo env $APTVARS apt-get install -y file
 
 # Previous versions from original script (HELMV 3.14.X causes continuous APIServer crashing on Ubuntu 22):
 # KUBEV="1.28" #.11"
