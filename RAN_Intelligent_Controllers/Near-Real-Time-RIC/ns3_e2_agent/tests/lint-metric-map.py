@@ -15,7 +15,9 @@ Checks:
   - no name overlaps the 9 names NIST's kpm_sim already writes
     (encode_kpm.cpp:30-40), which sit in cellMetrics since M3.
 With --samples, also reports every src pointer that never resolves in any
-sample line of the matching kind (hello lines give the kind).
+sample line of the matching kind (hello lines give the kind). Pointers through
+an array index (the neighbour slots, padded with noValue by design) are only
+reported as INFO: scenario-zero has fewer than 8 neighbour cells.
 """
 import json
 import os
@@ -105,7 +107,11 @@ def check_samples(doc, path):
                 key = (r["kind"], r["list"], r["kpm"])
                 roots = [m] if r["scope"] == "sample" else m.get("ues", [])
                 seen[key] = seen.get(key, False) or any(resolve(x, r["src"]) for x in roots)
-    return ["src never resolves: %s/%s/%s" % k for k, ok in sorted(seen.items()) if not ok]
+    padded = {(r["kind"], r["list"], r["kpm"]) for r in doc["rows"] if any(t.isdigit() for t in r["src"].split("/"))}
+    for k, ok in sorted(seen.items()):
+        if not ok and k in padded:
+            print("INFO padded slot never present: %s/%s/%s" % k)
+    return ["src never resolves: %s/%s/%s" % k for k, ok in sorted(seen.items()) if not ok and k not in padded]
 
 
 def main(argv):

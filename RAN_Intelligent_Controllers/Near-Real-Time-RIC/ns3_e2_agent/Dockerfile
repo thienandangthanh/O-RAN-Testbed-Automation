@@ -14,7 +14,7 @@
 #   docker build --build-arg CONTAINER_PULL_REGISTRY=nexus3.o-ran-sc.org:10002 \
 #     -f e2sm_examples/ns3_e2_agent/Dockerfile -t ns3-e2-agent:<tag> .
 ARG CONTAINER_PULL_REGISTRY=nexus3.o-ran-sc.org:10001
-FROM ${CONTAINER_PULL_REGISTRY}/o-ran-sc/bldr-ubuntu22-c-go:1.0.0 as buildenv
+FROM ${CONTAINER_PULL_REGISTRY}/o-ran-sc/bldr-ubuntu22-c-go:1.0.0 AS buildenv
 
 RUN mkdir -p /playpen/e2sim /playpen/agent
 WORKDIR /playpen
