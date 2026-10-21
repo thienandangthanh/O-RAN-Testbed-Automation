@@ -29,6 +29,8 @@ class E2Session {
   int poll_fd(short &events) const;
   void on_poll(short revents, int64_t nowMs);
   bool ready() const { return state_ == State::Ready; }
+  // Orderly stop (SIGTERM): end the association with SHUTDOWN, bounded.
+  void stop(int timeoutMs) { sctp_.graceful_close(timeoutMs); }
   size_t subscriptions() const { return subs_.size(); }
   // Sends the sample's indications under every subscription (option A).
   // Returns true when every indication was sent.

@@ -8,6 +8,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/sctp.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -161,6 +162,20 @@ void SctpAssociation::close() {
   fd_ = -1;
   connecting_ = false;
   partial_.clear();
+}
+
+void SctpAssociation::graceful_close(int timeoutMs) {
+  if (fd_ < 0 || connecting_) { close(); return; }
+  ::shutdown(fd_, SHUT_WR);  // one-to-one SCTP: sends SHUTDOWN
+  char buf[2048];
+  for (int waited = 0; waited < timeoutMs; waited += 100) {
+    struct pollfd p = {fd_, POLLIN, 0};
+    if (::poll(&p, 1, 100) <= 0) continue;
+    ssize_t n = ::recv(fd_, buf, sizeof buf, MSG_DONTWAIT);
+    if (n == 0) break;  // SHUTDOWN COMPLETE: association ended
+    if (n < 0 && errno != EAGAIN && errno != EINTR) break;
+  }
+  close();
 }
 
 std::string SctpAssociation::local_endpoint() const {

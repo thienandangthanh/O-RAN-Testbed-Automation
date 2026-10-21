@@ -174,6 +174,7 @@ int main() {
       if (ipc.client_fd() < 0) ist.helloSeen = false;
     }
   }
+  e2.stop(2000);
   print_stats_line(stats(), "exit", "signal");
   return 0;
 }
