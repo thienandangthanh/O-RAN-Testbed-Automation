@@ -1,0 +1,13 @@
+diff --git a/e2sm/asn1/kpm2_0.asn b/e2sm/asn1/kpm2_0.asn
+index 8fee31a..01fb350 100644
+--- a/e2sm/asn1/kpm2_0.asn
++++ b/e2sm/asn1/kpm2_0.asn
+@@ -28,7 +28,7 @@ IMPORTS
+ 	UEID
+ FROM E2SM-COMMON-IEs;
+ 
+-TimeStamp ::= OCTET STRING (SIZE(4))
++TimeStamp ::= OCTET STRING (SIZE(8))
+ 
+ GranularityPeriod ::= INTEGER (1.. 4294967295)
+ 

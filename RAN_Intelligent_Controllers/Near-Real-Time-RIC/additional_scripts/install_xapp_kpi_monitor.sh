@@ -36,7 +36,9 @@ echo "# Script: $(realpath "$0") $@"
 # Exit immediately if a command fails
 set -e
 
-CLEAN_INSTALL=false
+# Modified 2026-10-21 (ns-O-RAN L-release port): CLEAN_INSTALL and
+# KPIMON_TIMESTAMP_SIZE8 may be set from the environment; defaults keep NIST's behaviour.
+CLEAN_INSTALL="${CLEAN_INSTALL:-false}"
 
 CURRENT_DIR=$(pwd)
 SCRIPT_DIR=$(dirname "$(realpath "$0")")
@@ -112,6 +114,18 @@ git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/k
 git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/lib/LogicalOR.c.patch"
 git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/lib/MatchingCondItem-Choice.c.patch"
 git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/lib/MatchingCondItem.c.patch"
+
+# E2SM-KPM v3 nodes (including NIST's own kpm_sim) send an 8-byte TimeStamp; kpimon's
+# v2.0 schema says SIZE(4), so its header decode stops with RC_WMORE. With
+# KPIMON_TIMESTAMP_SIZE8=true the schema says SIZE(8) and TimeStamp.c carries the
+# matching constraint tables, regenerated with asn1c mouse07410@584d86e (the
+# generator that reproduces the shipped e2sm/lib byte for byte).
+git restore e2sm/lib/TimeStamp.c
+if [ "${KPIMON_TIMESTAMP_SIZE8:-false}" = "true" ]; then
+    echo "Applying the 8-byte E2SM-KPM TimeStamp patch..."
+    git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/asn1/kpm2_0.asn.timestamp-size8.patch"
+    git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/lib/TimeStamp.c.timestamp-size8.patch"
+fi
 
 git restore control/control.go
 if [ ! -f "control/control.go.previous" ]; then
