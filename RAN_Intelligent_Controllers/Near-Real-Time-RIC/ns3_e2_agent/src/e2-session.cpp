@@ -139,6 +139,10 @@ void E2Session::handle_pdu(const Bytes &pdu) {
       break;
     }
     case InboundPdu::ErrorIndication: stats().errorIndications++; break;
+    case InboundPdu::ControlRequest:
+      if (onControl_) onControl_(p);
+      else stats().otherPdus++;
+      break;
     default: stats().otherPdus++; break;  // ServiceUpdateAck, Reset, RICcontrol, ...: log only
   }
 }

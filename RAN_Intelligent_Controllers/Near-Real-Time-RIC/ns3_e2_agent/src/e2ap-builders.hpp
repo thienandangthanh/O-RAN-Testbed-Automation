@@ -29,6 +29,17 @@ bool build_subscription_delete_response(long requestorId, long instanceId, long 
 bool build_service_update(const Config &cfg, const Bytes &ranFuncDef, long transactionId, Bytes &out,
                           std::string &err);
 
+// RICcontrolAcknowledge (agent-owned builder; E2AP v03.00 9.1.1.9): RIC Request
+// ID, RAN Function ID, RIC Call Process ID if the request had one, and the
+// E2SM RIC Control Outcome octets.
+bool build_control_ack(long requestorId, long instanceId, long ranFuncId, const Bytes *callProcessId,
+                       const Bytes &outcome, Bytes &out, std::string &err);
+
+// RICcontrolFailure (agent-owned builder; E2AP v03.00 9.1.1.10) with a
+// ricRequest cause (CauseRICrequest value).
+bool build_control_failure(long requestorId, long instanceId, long ranFuncId, const Bytes *callProcessId,
+                           long ricRequestCause, Bytes &out, std::string &err);
+
 // RICindication (REPORT) carrying one E2SM header + message; refuses messages
 // larger than the generator's fixed 8192-byte copy buffer.
 bool build_indication(long requestorId, long instanceId, long ranFuncId, long actionId, long sn,

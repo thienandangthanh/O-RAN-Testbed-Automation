@@ -14,6 +14,7 @@ extern "C" {
 #include "InitiatingMessage.h"
 #include "ProtocolIE-Field.h"
 #include "SuccessfulOutcome.h"
+#include "UnsuccessfulOutcome.h"
 }
 
 namespace agent {
@@ -139,6 +140,79 @@ bool build_subscription_delete_response(long requestorId, long instanceId, long 
   fn->value.choice.RANfunctionID = ranFuncId;
   ASN_SEQUENCE_ADD(&list, fn);
   return finish(pdu, true, "RICsubscriptionDeleteResponse", out, err);
+}
+
+namespace {
+// Adds one protocol IE to a control answer; criticalities per E2AP v03.00 9.1.1.9/9.1.1.10.
+template <typename IE, typename List>
+IE *add_ie(List &list, long id, long criticality) {
+  auto *ie = (IE *)calloc(1, sizeof(IE));
+  ie->id = id;
+  ie->criticality = criticality;
+  ASN_SEQUENCE_ADD(&list, ie);
+  return ie;
+}
+}  // namespace
+
+bool build_control_ack(long requestorId, long instanceId, long ranFuncId, const Bytes *callProcessId,
+                       const Bytes &outcome, Bytes &out, std::string &err) {
+  E2AP_PDU_t *pdu = new_pdu();
+  pdu->present = E2AP_PDU_PR_successfulOutcome;
+  auto *so = (SuccessfulOutcome_t *)calloc(1, sizeof(SuccessfulOutcome_t));
+  pdu->choice.successfulOutcome = so;
+  so->procedureCode = ProcedureCode_id_RICcontrol;
+  so->criticality = Criticality_reject;
+  so->value.present = SuccessfulOutcome__value_PR_RICcontrolAcknowledge;
+  auto &list = so->value.choice.RICcontrolAcknowledge.protocolIEs.list;
+  using IE = RICcontrolAcknowledge_IEs_t;
+  IE *req = add_ie<IE>(list, ProtocolIE_ID_id_RICrequestID, Criticality_reject);
+  req->value.present = RICcontrolAcknowledge_IEs__value_PR_RICrequestID;
+  req->value.choice.RICrequestID.ricRequestorID = requestorId;
+  req->value.choice.RICrequestID.ricInstanceID = instanceId;
+  IE *fn = add_ie<IE>(list, ProtocolIE_ID_id_RANfunctionID, Criticality_reject);
+  fn->value.present = RICcontrolAcknowledge_IEs__value_PR_RANfunctionID;
+  fn->value.choice.RANfunctionID = ranFuncId;
+  if (callProcessId) {
+    IE *cp = add_ie<IE>(list, ProtocolIE_ID_id_RICcallProcessID, Criticality_reject);
+    cp->value.present = RICcontrolAcknowledge_IEs__value_PR_RICcallProcessID;
+    OCTET_STRING_fromBuf(&cp->value.choice.RICcallProcessID, (const char *)callProcessId->data(),
+                         (int)callProcessId->size());
+  }
+  IE *oc = add_ie<IE>(list, ProtocolIE_ID_id_RICcontrolOutcome, Criticality_reject);
+  oc->value.present = RICcontrolAcknowledge_IEs__value_PR_RICcontrolOutcome;
+  OCTET_STRING_fromBuf(&oc->value.choice.RICcontrolOutcome, (const char *)outcome.data(), (int)outcome.size());
+  return finish(pdu, true, "RICcontrolAcknowledge", out, err);
+}
+
+bool build_control_failure(long requestorId, long instanceId, long ranFuncId, const Bytes *callProcessId,
+                           long ricRequestCause, Bytes &out, std::string &err) {
+  E2AP_PDU_t *pdu = new_pdu();
+  pdu->present = E2AP_PDU_PR_unsuccessfulOutcome;
+  auto *uo = (UnsuccessfulOutcome_t *)calloc(1, sizeof(UnsuccessfulOutcome_t));
+  pdu->choice.unsuccessfulOutcome = uo;
+  uo->procedureCode = ProcedureCode_id_RICcontrol;
+  uo->criticality = Criticality_reject;
+  uo->value.present = UnsuccessfulOutcome__value_PR_RICcontrolFailure;
+  auto &list = uo->value.choice.RICcontrolFailure.protocolIEs.list;
+  using IE = RICcontrolFailure_IEs_t;
+  IE *req = add_ie<IE>(list, ProtocolIE_ID_id_RICrequestID, Criticality_reject);
+  req->value.present = RICcontrolFailure_IEs__value_PR_RICrequestID;
+  req->value.choice.RICrequestID.ricRequestorID = requestorId;
+  req->value.choice.RICrequestID.ricInstanceID = instanceId;
+  IE *fn = add_ie<IE>(list, ProtocolIE_ID_id_RANfunctionID, Criticality_reject);
+  fn->value.present = RICcontrolFailure_IEs__value_PR_RANfunctionID;
+  fn->value.choice.RANfunctionID = ranFuncId;
+  if (callProcessId) {
+    IE *cp = add_ie<IE>(list, ProtocolIE_ID_id_RICcallProcessID, Criticality_reject);
+    cp->value.present = RICcontrolFailure_IEs__value_PR_RICcallProcessID;
+    OCTET_STRING_fromBuf(&cp->value.choice.RICcallProcessID, (const char *)callProcessId->data(),
+                         (int)callProcessId->size());
+  }
+  IE *ca = add_ie<IE>(list, ProtocolIE_ID_id_Cause, Criticality_ignore);
+  ca->value.present = RICcontrolFailure_IEs__value_PR_Cause;
+  ca->value.choice.Cause.present = Cause_PR_ricRequest;
+  ca->value.choice.Cause.choice.ricRequest = ricRequestCause;
+  return finish(pdu, true, "RICcontrolFailure", out, err);
 }
 
 bool build_service_update(const Config &cfg, const Bytes &ranFuncDef, long transactionId, Bytes &out,

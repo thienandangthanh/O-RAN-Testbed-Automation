@@ -9,7 +9,8 @@
 #   - the agent is the ENTRYPOINT (the child of docker-init under
 #     `docker run --init`), so the Docker restart policy sees its exits;
 #     NIST's image idles on CMD sleep and runs kpm_sim through docker exec.
-#   - the metric map is copied to /etc/ns3-e2-agent/.
+#   - the metric map is copied to /etc/ns3-e2-agent/;
+#   - ric-app-rc's generated E2SM-RC code (pinned commit) builds librc_codec.so.
 #
 # Build (from e2-interface/e2sim, see install_scripts/install_ns3_e2_agent.sh):
 #   docker build --build-arg CONTAINER_PULL_REGISTRY=nexus3.o-ran-sc.org:10002 \
@@ -27,6 +28,7 @@ RUN apt-get update \
 	libsctp-dev \
 	lksctp-tools \
 	nlohmann-json3-dev \
+	git \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
@@ -38,10 +40,18 @@ RUN mkdir /playpen/e2sim/build && cd /playpen/e2sim/build && cmake .. && make pa
 RUN dpkg -i /playpen/e2sim/build/e2sim_1.0.0_amd64.deb /playpen/e2sim/build/e2sim-dev_1.0.0_amd64.deb
 RUN rm -rf /playpen/e2sim
 
-# The agent and its codec probe, against NIST's E2AP + E2SM-KPM v3 asn1c.
+# ric-app-rc's own generated E2SM-RC v2.0 code, for librc_codec.so (the code
+# rc encodes its RIC CONTROL requests with), at the rc commit NIST installs.
+ARG RC_SHA=a2282eedc9e32f60298bf530456ad367bef0824b
+RUN git clone -q https://github.com/o-ran-sc/ric-app-rc.git /playpen/rc && git -C /playpen/rc checkout -q $RC_SHA \
+	&& test "$(git -C /playpen/rc rev-parse HEAD)" = "$RC_SHA"
+
+# The agent, its codec probe and the RC control unit test, against NIST's
+# E2AP + E2SM-KPM v3 asn1c (and librc_codec.so for E2SM-RC).
 COPY e2sm_examples/ns3_e2_agent/ /playpen/agent/
 COPY asn1c/ /playpen/agent/asn1c/
-RUN cd /playpen/agent && rm -rf .build && mkdir .build && cd .build && cmake .. && make -j"$(nproc)" install
+RUN cd /playpen/agent && rm -rf .build && mkdir .build && cd .build && cmake -DRC_E2SM_DIR=/playpen/rc/e2sm .. \
+	&& make -j"$(nproc)" install && ldconfig
 RUN mkdir -p /etc/ns3-e2-agent && cp /playpen/agent/schema/metric-map.v1.json /etc/ns3-e2-agent/ \
 	&& sha256sum /etc/ns3-e2-agent/metric-map.v1.json
 

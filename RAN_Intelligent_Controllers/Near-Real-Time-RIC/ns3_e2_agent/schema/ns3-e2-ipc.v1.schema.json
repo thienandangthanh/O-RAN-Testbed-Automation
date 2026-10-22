@@ -2,11 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ns3-e2-ipc.v1",
   "title": "ns-3 to E2 agent IPC, version 1",
-  "description": "Newline-delimited JSON over TCP, one object per line, UTF-8, at most 1 MiB per line, ns-3 -> agent only in v1. ns-3 writes the identical line to its local trace before sending, so the trace is the wire. Non-finite doubles are encoded as null. Doubles use shortest round-trip decimal so values compare bit-exactly. Receivers ignore unknown keys; a new key bumps 'minor', a breaking change bumps 'v'. The types 'control', 'controlAck' and 'step' are reserved for RC and pacing (M8); v1 emitters must drain and ignore inbound bytes.",
+  "description": "Newline-delimited JSON over TCP, one object per line, UTF-8, at most 1 MiB per line, ns-3 -> agent only in v1. ns-3 writes the identical line to its local trace before sending, so the trace is the wire. Non-finite doubles are encoded as null. Doubles use shortest round-trip decimal so values compare bit-exactly. Receivers ignore unknown keys; a new key bumps 'minor', a breaking change bumps 'v'. Minor 1 adds 'control' (agent -> ns-3, an RC handover control the agent decoded) and 'controlAck' (ns-3 -> agent, its outcome); 'step' is reserved for pacing. Wall-clock values appear only inside 'diag'.",
   "oneOf": [
     { "$ref": "#/$defs/hello" },
     { "$ref": "#/$defs/sample" },
-    { "$ref": "#/$defs/bye" }
+    { "$ref": "#/$defs/bye" },
+    { "$ref": "#/$defs/control" },
+    { "$ref": "#/$defs/controlAck" }
   ],
   "$defs": {
     "nodeId": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "ns-3 cellId of the E2 node (LTE eNB = 1, mmWave gNBs = 2..1+N in scenario-zero)." },
@@ -109,6 +111,41 @@
         "droppedDisconnected": { "type": "integer" },
         "droppedBackpressure": { "type": "integer" }
       }
+    },
+    "control": {
+      "type": "object",
+      "required": ["type", "v", "nodeId", "ctlId", "imsi", "targetCellId", "afterSeq"],
+      "properties": {
+        "type": { "const": "control" },
+        "v": { "const": 1 },
+        "nodeId": { "$ref": "#/$defs/nodeId", "description": "Node whose agent received the RICcontrolRequest (viaNodeId)." },
+        "ctlId": { "type": "integer", "minimum": 1, "description": "Agent-monotonic id; the agent's pending key." },
+        "ric": { "type": "object", "properties": { "requestorId": { "type": "integer" }, "instanceId": { "type": "integer" }, "ranFuncId": { "type": "integer" } } },
+        "style": { "type": "integer" },
+        "action": { "type": "integer" },
+        "imsi": { "type": "integer", "minimum": 0, "description": "Decimal IMSI, carried in the AMF-UE-NGAP-ID (recorded deviation P4)." },
+        "targetCellId": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "afterSeq": { "type": "integer", "description": "Last sample seq the agent had received when it forwarded the control." },
+        "diag": { "type": "object", "description": "Diagnostics only (wall clock); excluded from digests." }
+      },
+      "additionalProperties": true
+    },
+    "controlAck": {
+      "type": "object",
+      "required": ["type", "v", "nodeId", "ctlId", "outcome", "cause", "seq", "applySimTimeNs"],
+      "properties": {
+        "type": { "const": "controlAck" },
+        "v": { "const": 1 },
+        "nodeId": { "$ref": "#/$defs/nodeId" },
+        "ctlId": { "type": "integer", "minimum": 1 },
+        "outcome": { "enum": ["applied", "refused"] },
+        "cause": { "enum": ["", "alreadyOnTarget", "inHandover", "unknownImsi", "unknownTarget", "lteFallback", "late"] },
+        "seq": { "type": "integer", "description": "Sample seq of the period boundary the control was handled at." },
+        "applySimTimeNs": { "type": "integer" },
+        "sourceCellId": { "type": "integer" }
+      },
+      "additionalProperties": true
     }
+
   }
 }

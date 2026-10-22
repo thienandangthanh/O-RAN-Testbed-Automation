@@ -30,6 +30,10 @@ struct InboundPdu {
   std::vector<long> actionIds;   // subscription request, in request order
   std::vector<long> actionTypes; // RICactionType per action (0 = report)
   std::vector<long> funcsAccepted, funcsRejected;  // E2SetupResponse
+  // RICcontrolRequest
+  std::vector<uint8_t> controlHeader, controlMessage, callProcessId;
+  bool hasCallProcessId = false;
+  long controlAckRequest = -1;   // -1 absent, 0 noAck, 1 ack
 };
 
 const char *inbound_kind_name(InboundPdu::Kind k);

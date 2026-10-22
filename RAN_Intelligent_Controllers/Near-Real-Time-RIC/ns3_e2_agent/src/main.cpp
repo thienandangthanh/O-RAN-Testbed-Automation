@@ -22,6 +22,7 @@
 #include "ipc-server.hpp"
 #include "kpm-encoder.hpp"
 #include "metric-map.hpp"
+#include "rc-control.hpp"
 #include "sample-forwarder.hpp"
 
 using namespace agent;
@@ -44,7 +45,7 @@ struct IpcState {
 };
 
 void handle_line(const std::string &line, const Config &cfg, SampleEncoder &enc, E2Session &e2, IpcServer &ipc,
-                 IpcState &st) {
+                 IpcState &st, RcControlPath &rc) {
   json m = json::parse(line, nullptr, false);
   if (m.is_discarded() || !m.is_object()) {
     stats().ipcBadJson++;
@@ -91,11 +92,14 @@ void handle_line(const std::string &line, const Config &cfg, SampleEncoder &enc,
       return;
     }
     if (e2.forward(es)) stats().samplesForwarded++;
+  } else if (type == "controlAck") {
+    rc.on_control_ack(m);
   } else if (type == "bye") {
     stats().byeRx++;
     ALOG_I("ipc: bye %s", line.c_str());
+    rc.fail_all_pending("ns-3 sent bye");
   } else {
-    stats().unknownType++;  // v1 ignores unknown types (control/step are reserved)
+    stats().unknownType++;  // unknown types are ignored (step is reserved for pacing)
   }
 }
 
@@ -139,6 +143,12 @@ int main() {
   SampleEncoder enc(cfg, map);
   E2Session e2(cfg, def, now_ms());
   IpcState ist;
+  RcControlPath rc(
+      cfg.nodeId, [&e2](const Bytes &pdu, const char *what) { e2.send_ctrl(pdu, what); },
+      [&ipc](const std::string &line) { return ipc.send_line(line); });
+  e2.set_control_handler([&](const InboundPdu &p) {
+    rc.on_request(p, stats().lastSeq, ipc.client_fd() >= 0 && ist.helloSeen);
+  });
   int64_t nextStats = now_ms() + cfg.statsIntervalS * 1000LL;
 
   while (!g_stop) {
@@ -147,7 +157,8 @@ int main() {
     fds[n++] = {tfd, POLLIN, 0};
     iListen = n;
     fds[n++] = {ipc.listen_fd(), POLLIN, 0};
-    if (ipc.client_fd() >= 0) iClient = n, fds[n++] = {ipc.client_fd(), POLLIN, 0};
+    if (ipc.client_fd() >= 0)
+      iClient = n, fds[n++] = {ipc.client_fd(), (short)(POLLIN | (ipc.want_write() ? POLLOUT : 0)), 0};
     short ev = 0;
     int sfd = e2.poll_fd(ev);
     if (sfd >= 0) iSctp = n, fds[n++] = {sfd, ev, 0};
@@ -168,10 +179,14 @@ int main() {
     if (iSctp >= 0 && fds[iSctp].revents) e2.on_poll(fds[iSctp].revents, now);
     if (fds[iListen].revents & POLLIN && ipc.on_accept()) ist.helloSeen = false;
     if (iClient >= 0 && fds[iClient].revents) {
+      if (fds[iClient].revents & POLLOUT) ipc.flush();
       std::vector<std::string> lines;
-      ipc.on_readable(lines);
-      for (const std::string &l : lines) handle_line(l, cfg, enc, e2, ipc, ist);
-      if (ipc.client_fd() < 0) ist.helloSeen = false;
+      if (ipc.client_fd() >= 0) ipc.on_readable(lines);
+      for (const std::string &l : lines) handle_line(l, cfg, enc, e2, ipc, ist, rc);
+      if (ipc.client_fd() < 0) {
+        ist.helloSeen = false;
+        rc.fail_all_pending("ns-3 IPC connection closed");
+      }
     }
   }
   e2.stop(2000);

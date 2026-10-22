@@ -30,6 +30,11 @@ struct Stats {
   uint64_t indTx = 0, indTxCell = 0, indTxUe = 0;
   uint64_t rxPdu = 0, rxPduUndecodable = 0, subsAdded = 0, subsReplaced = 0, subsDeleted = 0;
   uint64_t subsOtherFunc = 0, serviceQueries = 0, errorIndications = 0, otherPdus = 0, ctrlSendFailed = 0;
+  // RC control path (rc-control.hpp)
+  uint64_t ctlRx = 0, ctlRejFunc = 0, ctlRejDecode = 0, ctlRejAction = 0, ctlRejIpcDown = 0;
+  uint64_t ctlForwarded = 0, ctlApplied = 0, ctlRefused = 0, ctlFailedOnBye = 0;
+  uint64_t ctlAckTx = 0, ctlFailTx = 0, ctlAckSuppressed = 0, ctlAckUnknown = 0, ctlAckBad = 0;
+  size_t ctlPending = 0;
 };
 
 // Prints one JSON line to stdout and flushes. `event` is "stats" or "exit".

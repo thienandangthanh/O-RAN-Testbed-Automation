@@ -9,6 +9,7 @@
 #define NS3_E2_AGENT_E2_SESSION_HPP
 
 #include <cstdint>
+#include <functional>
 
 #include "agent-config.hpp"
 #include "e2ap-inbound.hpp"
@@ -35,6 +36,10 @@ class E2Session {
   // Sends the sample's indications under every subscription (option A).
   // Returns true when every indication was sent.
   bool forward(const EncodedSample &s);
+  // Receives every RICcontrolRequest (READY state only).
+  void set_control_handler(std::function<void(const InboundPdu &)> h) { onControl_ = std::move(h); }
+  // Sends one E2AP PDU on the association (association loss: exit 2).
+  void send_ctrl(const Bytes &pdu, const char *what);
 
  private:
   void set_state(State s);
@@ -42,7 +47,6 @@ class E2Session {
   void attempt_failed(const std::string &why, int64_t nowMs);
   void handle_pdu(const Bytes &pdu);
   void on_subscription(const InboundPdu &p);
-  void send_ctrl(const Bytes &pdu, const char *what);
 
   const Config &cfg_;
   const Bytes &ranFuncDef_;
@@ -51,6 +55,7 @@ class E2Session {
   bool waitingRetry_ = false;
   SctpAssociation sctp_;
   SubscriptionTable subs_;
+  std::function<void(const InboundPdu &)> onControl_;
 };
 
 }  // namespace agent

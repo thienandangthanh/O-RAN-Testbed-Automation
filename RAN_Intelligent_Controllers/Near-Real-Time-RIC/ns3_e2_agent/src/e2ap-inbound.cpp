@@ -71,6 +71,32 @@ void summarize_setup_response(const E2setupResponse_t &r, InboundPdu &o) {
   }
 }
 
+void summarize_control(const RICcontrolRequest_t &r, InboundPdu &o) {
+  for (int i = 0; i < r.protocolIEs.list.count; i++) {
+    const RICcontrolRequest_IEs_t *ie = r.protocolIEs.list.array[i];
+    const auto &v = ie->value.choice;
+    switch (ie->value.present) {
+      case RICcontrolRequest_IEs__value_PR_RICrequestID:
+        o.requestorId = v.RICrequestID.ricRequestorID;
+        o.instanceId = v.RICrequestID.ricInstanceID;
+        break;
+      case RICcontrolRequest_IEs__value_PR_RANfunctionID: o.ranFuncId = v.RANfunctionID; break;
+      case RICcontrolRequest_IEs__value_PR_RICcallProcessID:
+        o.hasCallProcessId = true;
+        o.callProcessId.assign(v.RICcallProcessID.buf, v.RICcallProcessID.buf + v.RICcallProcessID.size);
+        break;
+      case RICcontrolRequest_IEs__value_PR_RICcontrolHeader:
+        o.controlHeader.assign(v.RICcontrolHeader.buf, v.RICcontrolHeader.buf + v.RICcontrolHeader.size);
+        break;
+      case RICcontrolRequest_IEs__value_PR_RICcontrolMessage:
+        o.controlMessage.assign(v.RICcontrolMessage.buf, v.RICcontrolMessage.buf + v.RICcontrolMessage.size);
+        break;
+      case RICcontrolRequest_IEs__value_PR_RICcontrolAckRequest: o.controlAckRequest = v.RICcontrolAckRequest; break;
+      default: break;
+    }
+  }
+}
+
 void summarize_query(const RICserviceQuery_t &r, InboundPdu &o) {
   for (int i = 0; i < r.protocolIEs.list.count; i++)
     if (r.protocolIEs.list.array[i]->value.present == RICserviceQuery_IEs__value_PR_TransactionID)
@@ -97,7 +123,10 @@ void summarize(const E2AP_PDU_t *pdu, InboundPdu &o) {
         break;
       case ProcedureCode_id_ErrorIndication: o.kind = InboundPdu::ErrorIndication; break;
       case ProcedureCode_id_Reset: o.kind = InboundPdu::ResetRequest; break;
-      case ProcedureCode_id_RICcontrol: o.kind = InboundPdu::ControlRequest; break;
+      case ProcedureCode_id_RICcontrol:
+        o.kind = InboundPdu::ControlRequest;
+        summarize_control(m->value.choice.RICcontrolRequest, o);
+        break;
       default: break;
     }
   } else if (pdu->present == E2AP_PDU_PR_successfulOutcome) {

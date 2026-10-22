@@ -94,6 +94,27 @@ void IpcServer::close_client(const char *why) {
   ::close(cfd_);
   cfd_ = -1;
   buf_.clear();
+  out_.clear();
+}
+
+bool IpcServer::send_line(const std::string &line) {
+  if (cfd_ < 0) return false;
+  out_ += line;
+  flush();
+  return true;
+}
+
+void IpcServer::flush() {
+  while (cfd_ >= 0 && !out_.empty()) {
+    ssize_t n = send(cfd_, out_.data(), out_.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+    if (n > 0) {
+      out_.erase(0, (size_t)n);
+      continue;
+    }
+    if (n < 0 && errno == EINTR) continue;
+    if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) close_client(strerror(errno));
+    return;
+  }
 }
 
 }  // namespace agent

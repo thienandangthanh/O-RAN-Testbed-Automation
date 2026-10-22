@@ -49,6 +49,11 @@ void print_stats_line(const Stats &s, const char *event, const std::string &reas
              {"subsReplaced", s.subsReplaced}, {"subsDeleted", s.subsDeleted}, {"subsOtherFunc", s.subsOtherFunc},
              {"serviceQueries", s.serviceQueries}, {"errorIndications", s.errorIndications},
              {"otherPdus", s.otherPdus}, {"ctrlSendFailed", s.ctrlSendFailed}};
+  j["rc"] = {{"rx", s.ctlRx}, {"rejFunc", s.ctlRejFunc}, {"rejDecode", s.ctlRejDecode},
+             {"rejAction", s.ctlRejAction}, {"rejIpcDown", s.ctlRejIpcDown}, {"forwarded", s.ctlForwarded},
+             {"applied", s.ctlApplied}, {"refused", s.ctlRefused}, {"failedOnBye", s.ctlFailedOnBye},
+             {"ackTx", s.ctlAckTx}, {"failTx", s.ctlFailTx}, {"ackSuppressed", s.ctlAckSuppressed},
+             {"ackUnknown", s.ctlAckUnknown}, {"ackBad", s.ctlAckBad}, {"pending", s.ctlPending}};
   if (!reason.empty()) j["reason"] = reason;
   fprintf(stdout, "%s\n", j.dump().c_str());
   fflush(stdout);
