@@ -53,6 +53,25 @@ struct FuncInfo {
 // response part) on its stack without zeroing them and copies them into the
 // PDU, so their asn1c parsing context is garbage and ASN_STRUCT_FREE crashes on
 // it. Zero those contexts in place; the octets themselves are untouched.
+// N5 (recorded deviation from E2AP v03.00 9.2.27, which expects the encoded
+// 3GPP setup request, here an EN-DC X2 SETUP REQUEST): a gNB agent's request
+// part is 5 raw octets, gNB-ID (4, big-endian) then cell id (1), e.g.
+// 00 00 00 02 02. e2mgr stores them, and the TS xApp finds the hex text
+// "0000000202" there as its cell key; rc turns the same key back into the
+// target NR CGI octets. The eNB keeps the generator's "reqpart".
+bool set_gnb_request_part(E2setupRequestIEs_t *ie, const Config &cfg) {
+  auto &items = ie->value.choice.E2nodeComponentConfigAddition_List.list;
+  uint8_t key[5] = {(uint8_t)(cfg.gnbId >> 24), (uint8_t)(cfg.gnbId >> 16), (uint8_t)(cfg.gnbId >> 8),
+                    (uint8_t)cfg.gnbId, (uint8_t)cfg.nodeId};
+  for (int k = 0; k < items.count; k++) {
+    auto *it = (E2nodeComponentConfigAddition_ItemIEs_t *)items.array[k];
+    OCTET_STRING_t &rp =
+        it->value.choice.E2nodeComponentConfigAddition_Item.e2nodeComponentConfiguration.e2nodeComponentRequestPart;
+    if (OCTET_STRING_fromBuf(&rp, (const char *)key, sizeof key) != 0) return false;
+  }
+  return items.count > 0;
+}
+
 void clear_component_config_contexts(E2setupRequestIEs_t *ie) {
   auto &items = ie->value.choice.E2nodeComponentConfigAddition_List.list;
   for (int k = 0; k < items.count; k++) {
@@ -75,12 +94,14 @@ bool build_setup_request(const Config &cfg, const Bytes &ranFuncDef, Bytes &out,
     FuncInfo f(cfg, ranFuncDef, kRanFunctionRevision);
     encoding::generate_e2apv1_setup_request_parameterized(pdu, {f.info});
   }
-  bool patched = false;
+  bool patched = false, reqPartOk = cfg.kind != "gnb";
   auto &list = pdu->choice.initiatingMessage->value.choice.E2setupRequest.protocolIEs.list;
   for (int i = 0; i < list.count; i++) {
     E2setupRequestIEs_t *ie = list.array[i];
-    if (ie->value.present == E2setupRequestIEs__value_PR_E2nodeComponentConfigAddition_List)
+    if (ie->value.present == E2setupRequestIEs__value_PR_E2nodeComponentConfigAddition_List) {
       clear_component_config_contexts(ie);
+      if (cfg.kind == "gnb") reqPartOk = set_gnb_request_part(ie, cfg);
+    }
     if (ie->value.present != E2setupRequestIEs__value_PR_GlobalE2node_ID) continue;
     GlobalE2node_ID_t &g = ie->value.choice.GlobalE2node_ID;
     if (g.present != GlobalE2node_ID_PR_gNB || !g.choice.gNB) continue;  // unexpected shape: leave patched false
@@ -93,7 +114,7 @@ bool build_setup_request(const Config &cfg, const Bytes &ranFuncDef, Bytes &out,
     for (int b = 0; b < 4; b++) id.buf[b] = (uint8_t)(v >> (24 - 8 * b));
     patched = true;
   }
-  return finish(pdu, patched, "E2SetupRequest", out, err);
+  return finish(pdu, patched && reqPartOk, "E2SetupRequest", out, err);
 }
 
 bool build_subscription_response(long requestorId, long instanceId, long ranFuncId,

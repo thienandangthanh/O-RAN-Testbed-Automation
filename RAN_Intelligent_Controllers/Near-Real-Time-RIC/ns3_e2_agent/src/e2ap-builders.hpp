@@ -12,7 +12,8 @@
 namespace agent {
 
 // E2SetupRequest: generator output with GlobalE2node gNB identity overwritten
-// (PLMN BCD, 29-bit gNB-ID, bits_unused 3), our OID, definition and revision.
+// (PLMN BCD, 29-bit gNB-ID, bits_unused 3), our OID, definition and revision;
+// gNB agents also carry the 5-byte cell key in e2nodeComponentRequestPart (N5).
 bool build_setup_request(const Config &cfg, const Bytes &ranFuncDef, Bytes &out, std::string &err);
 
 // RICsubscriptionResponse admitting every action; the generator's hard-coded
