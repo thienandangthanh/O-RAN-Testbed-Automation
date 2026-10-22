@@ -35,6 +35,7 @@ struct Stats {
   uint64_t ctlForwarded = 0, ctlApplied = 0, ctlRefused = 0, ctlFailedOnBye = 0;
   uint64_t ctlAckTx = 0, ctlFailTx = 0, ctlAckSuppressed = 0, ctlAckUnknown = 0, ctlAckBad = 0;
   size_t ctlPending = 0;
+  uint64_t stepsTx = 0;  // lock-step `step` lines sent
 };
 
 // Prints one JSON line to stdout and flushes. `event` is "stats" or "exit".

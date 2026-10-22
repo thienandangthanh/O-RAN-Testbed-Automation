@@ -90,6 +90,7 @@ bool load_config_from_env(Config &cfg) {
   ok = env_int("E2_UES_PER_IND", 1, 1024, cfg.uesPerInd) && ok;
   ok = env_int("E2_MAX_E2SM_BYTES", 256, kGeneratorMessageLimit, cfg.maxE2smBytes) && ok;
   ok = env_int("E2_STATS_INTERVAL_S", 1, 3600, cfg.statsIntervalS) && ok;
+  ok = env_int("E2_TEST_WITHHOLD_STEP", -1, 1L << 40, cfg.testWithholdStep) && ok;
   return ok;
 }
 
