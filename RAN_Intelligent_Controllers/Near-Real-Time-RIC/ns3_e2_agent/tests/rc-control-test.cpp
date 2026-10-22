@@ -271,6 +271,20 @@ int main(int argc, char **argv) {
     h.ack(1, "applied");
     verdict("noack-applied-sends-nothing", h.e2.empty() && h.rc.pending() == 0);
   }
+  {  // ns-3 answers a control that arrived after the last barrier as late -> one FAILURE
+     // control-failed-to-execute, also under NoAck (it suppresses only the ACK)
+    bool ok = true;
+    for (long ackReq : {-1L, 0L}) {
+      Harness h;
+      h.request(control_request(32, 1, 3, hdr, msg, ackReq));
+      h.ack(1, "refused", "late");
+      h.ack(1, "refused", "late");
+      Answer a = h.e2.size() == 1 ? decode_answer(h.e2[0]) : Answer{};
+      ok = ok && a.ok && a.kind == "failure" && a.cause == CauseRICrequest_control_failed_to_execute && a.reqId == 32 &&
+           h.rc.pending() == 0;
+    }
+    verdict("late-refusal-control-failed-to-execute", ok);
+  }
   {  // an ack for an unknown ctlId answers nothing; a repeated ack answers once
     Harness h;
     h.request(control_request(31, 1, 3, hdr, msg, -1));
