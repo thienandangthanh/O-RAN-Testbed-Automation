@@ -29,6 +29,8 @@ struct Config {
   int uesPerInd = 4;              // E2_UES_PER_IND
   int maxE2smBytes = 7000;        // E2_MAX_E2SM_BYTES
   int statsIntervalS = 5;         // E2_STATS_INTERVAL_S
+  long testWithholdStep = -2;     // E2_TEST_WITHHOLD_STEP (test only): never send step <k>
+  long testWithholdNode = 0;      // E2_TEST_WITHHOLD_NODE (test only): withhold only on this node id (0 = any)
 };
 
 // Revision advertised for the KPM RAN function (same as NIST's kpm_sim).

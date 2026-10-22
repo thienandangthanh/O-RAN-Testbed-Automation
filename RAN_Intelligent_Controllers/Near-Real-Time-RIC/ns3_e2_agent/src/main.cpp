@@ -42,7 +42,48 @@ int64_t now_ms() {
 struct IpcState {
   bool helloSeen = false;
   HelloInfo hello;
+  bool lockstep = false;   // hello.pacing == "lockstep"
+  bool readySent = false;  // step -1 sent on this connection
 };
+
+// Lock-step pacing (ns3-e2-ipc v1 minor 2): after every sample the agent tells
+// ns-3 it is done with that step; seq -1 means READY with a subscription.
+// Agents never block; ns-3's barrier waits for every node's step.
+void send_step(const Config &cfg, IpcServer &ipc, int64_t seq) {
+  if (seq == cfg.testWithholdStep && (cfg.testWithholdNode == 0 || cfg.testWithholdNode == cfg.nodeId)) {
+    ALOG_W("test: withholding step %lld (E2_TEST_WITHHOLD_STEP)", (long long)seq);
+    return;
+  }
+  nlohmann::ordered_json j;
+  j["type"] = "step";
+  j["v"] = 1;
+  j["nodeId"] = cfg.nodeId;
+  j["seq"] = seq;
+  j["forwarded"] = stats().samplesForwarded;
+  j["droppedNoSub"] = stats().droppedNoSub;
+  j["controls"] = stats().ctlForwarded;
+  ipc.send_line(j.dump() + "\n");
+  stats().stepsTx++;
+}
+
+void forward_sample(const json &m, SampleEncoder &enc, E2Session &e2, IpcState &st) {
+  if (!e2.ready()) {
+    stats().droppedE2Down++;
+    return;
+  }
+  if (e2.subscriptions() == 0) {
+    stats().droppedNoSub++;
+    return;
+  }
+  EncodedSample es;
+  std::string err;
+  if (!enc.encode(m, st.hello, es, err)) {
+    stats().droppedEncode++;
+    ALOG_E("sample seq %lld not encoded: %s", (long long)es.seq, err.c_str());
+    return;
+  }
+  if (e2.forward(es)) stats().samplesForwarded++;
+}
 
 void handle_line(const std::string &line, const Config &cfg, SampleEncoder &enc, E2Session &e2, IpcServer &ipc,
                  IpcState &st, RcControlPath &rc) {
@@ -63,6 +104,8 @@ void handle_line(const std::string &line, const Config &cfg, SampleEncoder &enc,
     }
     stats().helloAccepted++;
     st.helloSeen = true;
+    st.lockstep = m.value("pacing", "free") == "lockstep";
+    st.readySent = false;
     ALOG_I("ipc: hello accepted (runId %s, periodNs %lld, simStartEpochMs %lld)", st.hello.runId.c_str(),
            (long long)st.hello.periodNs, (long long)st.hello.simStartEpochMs);
   } else if (type == "sample") {
@@ -76,22 +119,8 @@ void handle_line(const std::string &line, const Config &cfg, SampleEncoder &enc,
     }
     stats().samplesIn++;
     if (m.contains("seq") && m["seq"].is_number_integer()) stats().lastSeq = m["seq"].get<int64_t>();
-    if (!e2.ready()) {
-      stats().droppedE2Down++;
-      return;
-    }
-    if (e2.subscriptions() == 0) {
-      stats().droppedNoSub++;
-      return;
-    }
-    EncodedSample es;
-    std::string err;
-    if (!enc.encode(m, st.hello, es, err)) {
-      stats().droppedEncode++;
-      ALOG_E("sample seq %lld not encoded: %s", (long long)es.seq, err.c_str());
-      return;
-    }
-    if (e2.forward(es)) stats().samplesForwarded++;
+    forward_sample(m, enc, e2, st);
+    if (st.lockstep) send_step(cfg, ipc, stats().lastSeq);
   } else if (type == "controlAck") {
     rc.on_control_ack(m);
   } else if (type == "bye") {
@@ -187,6 +216,11 @@ int main() {
         ist.helloSeen = false;
         rc.fail_all_pending("ns-3 IPC connection closed");
       }
+    }
+    if (ist.helloSeen && ist.lockstep && !ist.readySent && e2.ready() && e2.subscriptions() > 0) {
+      send_step(cfg, ipc, -1);
+      ist.readySent = true;
+      ALOG_I("lock-step: READY with %zu subscription(s); step -1 sent", e2.subscriptions());
     }
   }
   e2.stop(2000);
