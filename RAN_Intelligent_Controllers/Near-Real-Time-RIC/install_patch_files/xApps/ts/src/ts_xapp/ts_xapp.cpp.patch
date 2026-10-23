@@ -1,0 +1,38 @@
+diff --git a/src/ts_xapp/ts_xapp.cpp b/src/ts_xapp/ts_xapp.cpp
+index d95bdbf..f1fca3a 100644
+--- a/src/ts_xapp/ts_xapp.cpp
++++ b/src/ts_xapp/ts_xapp.cpp
+@@ -153,6 +153,7 @@ struct PolicyHandler : public BaseReaderHandler<UTF8<>, PolicyHandler> {
+   int threshold;
+   std::string operation;
+   bool found_threshold = false;
++  std::string payload_str;  // a1mediator 3.x sends "payload" as a JSON string
+ 
+   bool Null() { return true; }
+   bool Bool(bool b) { return true; }
+@@ -190,6 +191,9 @@ struct PolicyHandler : public BaseReaderHandler<UTF8<>, PolicyHandler> {
+     if (curr_key.compare("operation") != 0) {
+       operation = str;
+     }
++    if (curr_key.compare("payload") == 0) {
++      payload_str.assign(str, length);
++    }
+ 
+     return true;
+   }
+@@ -516,6 +520,15 @@ void policy_callback( Message& mbuf, int mtype, int subid, int len, Msg_componen
+   Reader reader;
+   StringStream ss(arg.c_str());
+   reader.Parse(ss,handler);
++  // the policy body nested as a JSON string (a1mediator 3.x) is parsed like the object form
++  if (!handler.found_threshold && !handler.payload_str.empty()) {
++    PolicyHandler body;
++    Reader body_reader;
++    StringStream body_ss(handler.payload_str.c_str());
++    body_reader.Parse(body_ss, body);
++    handler.found_threshold = body.found_threshold;
++    handler.threshold = body.threshold;
++  }
+ 
+   //Set the threshold value
+   if (handler.found_threshold) {

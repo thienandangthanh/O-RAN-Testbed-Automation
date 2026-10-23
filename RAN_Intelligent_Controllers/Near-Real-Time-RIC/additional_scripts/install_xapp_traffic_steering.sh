@@ -83,6 +83,13 @@ if [ -f "routes.txt" ] && grep -q "service-ricxapp-ad-rmr:4560" routes.txt; then
     sed -i 's/service-ricxapp-ad-rmr:4560/service-ricxapp-ad-rmr.ricxapp.svc.cluster.local:4560/g' routes.txt
 fi
 
+# The Go a1mediator (3.x) sends the A1 policy body as a JSON string under "payload"; the TS xApp reads only an
+# object there, so the threshold would never be set. The patch also parses the string form. Restoring first
+# rewrites the source, so the image below is rebuilt from the patched tree.
+echo "Patching src/ts_xapp/ts_xapp.cpp to accept the A1 policy body as a JSON string..."
+git restore src/ts_xapp/ts_xapp.cpp
+git apply --verbose "$PARENT_DIR/install_patch_files/xApps/ts/src/ts_xapp/ts_xapp.cpp.patch"
+
 echo "Creating and modifying the configuration file xapp-descriptor/config-file_updated.json"
 # Check if jq is installed; if not, install it
 if ! command -v jq &>/dev/null; then
