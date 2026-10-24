@@ -1,0 +1,12 @@
+diff --git a/src/ts_xapp/ts_xapp.cpp b/src/ts_xapp/ts_xapp.cpp
+index d95bdbf..1616b81 100644
+--- a/src/ts_xapp/ts_xapp.cpp
++++ b/src/ts_xapp/ts_xapp.cpp
+@@ -901,6 +901,7 @@ extern int main( int argc, char** argv ) {
+   xfw->Add_msg_cb( A1_POLICY_REQ, policy_callback, NULL );          // msg type 20010
+   xfw->Add_msg_cb( TS_QOE_PREDICTION, prediction_callback, NULL );  // msg type 30002
+   xfw->Add_msg_cb( TS_ANOMALY_UPDATE, ad_callback, NULL ); /*Register a callback function for msg type 30003*/
++  xfw->Add_msg_cb( Messenger::DEFAULT_CALLBACK, []( Message&, int, int, int, Msg_component, void* ) {}, NULL );  // drop unhandled types (stray 12041/12042)
+ 
+   xfw->Run( nthreads );
+ 
