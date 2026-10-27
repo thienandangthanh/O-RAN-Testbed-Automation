@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
   auto ts = ntp64_from_unix_ms(1792627200123LL);
   if (!encode_indication_header(ts, "ns3-cell-2", kSenderType, kVendorName, hdr, err)) return fail("header", err), 1;
 
-  // (c) format 1 over the 33-entry cell list: INTEGER, REAL (edge doubles), noValue.
+  // (c) format 1 over the full cell list: INTEGER, REAL (edge doubles), noValue.
   const double dbl[] = {0.1, -0.0, 0.0, 9007199254740992.0, 1e300, -1e300, 5e-324, 2.2250738585072014e-308,
                         1.7976931348623157e308, -1.5, 123456.789, 1.0 / 3.0, -273.15, 1e-10, M_PI};
   std::vector<MeasValue> f1 = {I(0), I(1), I(42), I(2147483647)};
