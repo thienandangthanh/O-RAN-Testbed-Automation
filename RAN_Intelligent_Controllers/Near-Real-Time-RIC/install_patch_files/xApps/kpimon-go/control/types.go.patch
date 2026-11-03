@@ -1,0 +1,26 @@
+diff --git a/control/types.go b/control/types.go
+index f999998..2562ab0 100644
+--- a/control/types.go
++++ b/control/types.go
+@@ -31,6 +31,13 @@ type NodeConfigs struct {
+ 	E2nodeComponentRequestPart     string
+ 	E2nodeComponentResponsePart    string `json:e2nodeComponentResponsePart",omitempty"`
+ }
++
++// Enb: e2mgr's "enb" body of an eNB nodeb record, read for the node identity only (e2mgr 6.0.6 keeps no RAN
++// functions for an eNB).
++type Enb struct {
++	EnbType string
++}
++
+ type Gnb struct {
+ 	RanFunctions []RanFunctions
+ 	GnbType      string
+@@ -53,6 +60,7 @@ type E2mgrResponse struct {
+ 	GlobalNbId                   GlobalNbId
+ 	NodeType                     string
+ 	Gnb                          Gnb
++	Enb                          *Enb   // set when e2mgr stores the node as an eNB (nodeType ENB)
+ 	AssociatedE2tInstanceAddress string `json:associatedE2tInstanceAddress",omitempty"`
+ 	SetupFromNetwork             bool
+ 	StatusUpdateTimeStamp        string

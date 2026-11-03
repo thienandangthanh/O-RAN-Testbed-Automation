@@ -1,0 +1,122 @@
+diff --git a/control/control.go b/control/control.go
+index 19cf558..268d4fb 100644
+--- a/control/control.go
++++ b/control/control.go
+@@ -8,6 +8,7 @@ package control
+ import "C"
+ import (
+ 	"context"
++	_ "embed"
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
+@@ -65,6 +66,82 @@ const xappDescriptorPath = "/opt/ric/config/config-file.json"
+ 
+ var reportingPeriodMs, granularityPeriodMs uint32
+ 
++// An E2 node that registers as an eNB (Global eNB ID) has no ranFunctions in e2mgr 6.0.6's nodeb record (e2mgr keeps
++// RAN functions for gNB-type nodes only), so kpimon cannot read its E2SM-KPM RAN Function Description there. For such
++// a node the measurement lists come from enb-kpm-measurements.json, installed with the Testbed patch set: the RAN
++// function 2 report styles the ns3-e2-agent eNB advertises (cell = style 1, action format 1; ue = style 3, action
++// format 3), each (measName, measId) in order, equal to the agent's metric map rows of kind enb.
++//
++//go:embed enb-kpm-measurements.json
++var enbKpmMeasurementsJSON []byte
++
++type kpmMeasurement struct {
++	MeasName string `json:"measName"`
++	MeasID   int64  `json:"measId"`
++}
++
++type kpmMeasurementLists struct {
++	Doc  []string         `json:"doc"`
++	Cell []kpmMeasurement `json:"cell"`
++	Ue   []kpmMeasurement `json:"ue"`
++}
++
++var enbKpmMeasurements = mustLoadEnbKpmMeasurements()
++
++// mustLoadEnbKpmMeasurements: the embedded lists, strictly decoded; kpimon does not start without a usable UE list.
++func mustLoadEnbKpmMeasurements() kpmMeasurementLists {
++	var l kpmMeasurementLists
++	d := json.NewDecoder(strings.NewReader(string(enbKpmMeasurementsJSON)))
++	d.DisallowUnknownFields()
++	if err := d.Decode(&l); err != nil {
++		panic("enb-kpm-measurements.json: " + err.Error())
++	}
++	for _, list := range [][]kpmMeasurement{l.Cell, l.Ue} {
++		for _, m := range list {
++			if m.MeasName == "" || m.MeasID < 1 {
++				panic(fmt.Sprintf("enb-kpm-measurements.json: bad row %+v", m))
++			}
++		}
++	}
++	if len(l.Ue) == 0 {
++		panic("enb-kpm-measurements.json: no ue rows")
++	}
++	return l
++}
++
++// isEnbNode: e2mgr stores the node as an eNB.
++func isEnbNode(resp *E2mgrResponse) bool { return resp.NodeType == "ENB" && resp.Enb != nil }
++
++func measNames(list []kpmMeasurement) []string {
++	names := make([]string, 0, len(list))
++	for _, m := range list {
++		names = append(names, m.MeasName)
++	}
++	return names
++}
++
++// encodeActionFormat3ByID: E2SM-KPM Action Definition Format 3 (report style 3) by measID, as kpimon encodes it from
++// a RAN Function Description (encode_action_Definition, determine 3).
++func encodeActionFormat3ByID(list []kpmMeasurement) clientmodel.ActionDefinition {
++	ids := make([]C.long, len(list))
++	for i, m := range list {
++		ids[i] = C.long(m.MeasID)
++	}
++	buf := make([]byte, 10240)
++	size := C.size_t(len(buf))
++	n := int64(C.e2sm_encode_ric_action_definition_format3_by_id((*C.uchar)(unsafe.Pointer(&buf[0])), &size, &ids[0],
++		C.size_t(len(ids)), C.long(3), C.ulong(granularityPeriodMs)))
++	if n <= 0 || n > int64(len(buf)) {
++		xapp.Logger.Error("eNB Action Definition Format 3: encoding failed (%d)", n)
++		return clientmodel.ActionDefinition{0}
++	}
++	def := make(clientmodel.ActionDefinition, n)
++	for i := range def {
++		def[i] = int64(buf[i])
++	}
++	return def
++}
++
+ // loadKpmControls reads controls.reportingPeriodMs and controls.granularityPeriodMs
+ // (integers 1..4294967295, required) from the xApp descriptor at path.
+ func loadKpmControls(path string) (uint32, uint32, error) {
+@@ -299,6 +376,9 @@ func encode_action_format3(meid string) clientmodel.ActionDefinition {
+ 		return l
+ 
+ 	}
++	if isEnbNode(&resp) {
++		return encodeActionFormat3ByID(enbKpmMeasurements.Ue)
++	}
+ 	counter := 0
+ 	//RanFunctionId=2 for kpm in viavi
+ 	for i := 0; i < len(resp.Gnb.RanFunctions); i++ {
+@@ -1096,6 +1176,16 @@ func (c Control) initializeNode(nb *xapp.RNIBNbIdentity) bool {
+ 			break
+ 		}
+ 	}
++	if counter == -1 && isEnbNode(&resp) {
++		// no F1 component and no RAN functions in e2mgr: the configured lists, no cells for action format 1
++		xapp.Logger.Info("E2 node %s is an eNB: KPM measurement lists from enb-kpm-measurements.json", nb.InventoryName)
++		metricsMu.Lock()
++		ranUeKpi[nb.InventoryName] = measNames(enbKpmMeasurements.Ue)
++		ranCellKpi[nb.InventoryName] = measNames(enbKpmMeasurements.Cell)
++		Glob_Ran_cell[nb.InventoryName] = nil
++		metricsMu.Unlock()
++		return true
++	}
+ 	if counter == -1 {
+ 		xapp.Logger.Error("E2 node %s does not advertise RAN function %d", nb.InventoryName, funcId)
+ 		return false

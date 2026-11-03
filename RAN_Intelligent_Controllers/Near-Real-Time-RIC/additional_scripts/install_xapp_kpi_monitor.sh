@@ -44,6 +44,13 @@ set -e
 # period; NIST's kpimon had a fixed 10000 ms) and reach kpimon through the
 # controls section of its xApp descriptor; a deployed kpimon with other values is
 # reinstalled instead of restarted.
+# Modified 2026-11-04 (ns-O-RAN L-release port): an E2 node that registers as an eNB
+# gets its KPM measurement lists from control/enb-kpm-measurements.json (e2mgr 6.0.6
+# stores no RAN functions for an eNB; the ns3-e2-agent's metric-map lint checks the
+# file against the agent's eNB rows). The patch set is listed in
+# install_patch_files/xApps/kpimon-go/patches.manifest; the image is labelled
+# patchset.sha256 (sha256 of the manifest followed by each listed file, in order) and
+# kpimon.timestamp-size8, and is rebuilt whenever a label differs.
 CLEAN_INSTALL="${CLEAN_INSTALL:-false}"
 KPIMON_REPORTING_PERIOD_MS="${KPIMON_REPORTING_PERIOD_MS:-100}"
 KPIMON_GRANULARITY_PERIOD_MS="${KPIMON_GRANULARITY_PERIOD_MS:-100}"
@@ -168,11 +175,27 @@ if [ "${KPIMON_TIMESTAMP_SIZE8:-false}" = "true" ]; then
 fi
 
 git restore control/control.go
+git restore control/types.go
 if [ ! -f "control/control.go.previous" ]; then
     echo "Backing up control/control.go to control/control.go.previous..."
     cp control/control.go control/control.go.previous
 fi
 git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/control/control.go.patch"
+echo "Applying the eNB KPM measurement lists (e2mgr keeps no RAN functions for an eNB)..."
+python3 -I "$PARENT_DIR/ns3_e2_agent/tests/lint-metric-map.py" "$PARENT_DIR/ns3_e2_agent/schema/metric-map.v1.json" \
+    --kpimon-enb "$PARENT_DIR/install_patch_files/xApps/kpimon-go/control/enb-kpm-measurements.json"
+git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/control/control.go.enb-measurements.patch"
+git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/control/types.go.patch"
+cp "$PARENT_DIR/install_patch_files/xApps/kpimon-go/control/enb-kpm-measurements.json" control/enb-kpm-measurements.json
+
+KPIMON_PATCH_DIR="$PARENT_DIR/install_patch_files/xApps/kpimon-go"
+mapfile -t KPIMON_PATCHES < <(grep -vE '^\s*(#|$)' "$KPIMON_PATCH_DIR/patches.manifest")
+if [ "${#KPIMON_PATCHES[@]}" -eq 0 ]; then
+    echo "ERROR: $KPIMON_PATCH_DIR/patches.manifest lists no file"
+    exit 1
+fi
+KPIMON_PATCHSET_SHA256=$( (cat "$KPIMON_PATCH_DIR/patches.manifest" && for p in "${KPIMON_PATCHES[@]}"; do cat "$KPIMON_PATCH_DIR/$p"; done) | sha256sum | cut -d' ' -f1)
+echo "KPIMON_PATCHSET_SHA256=$KPIMON_PATCHSET_SHA256"
 
 # Replace my-org with influxdata in control/control.go
 if grep -q '"my-org"' control/control.go; then
@@ -312,8 +335,11 @@ if [ -z "$FIXED_DOCKER_PERMS" ]; then
 fi
 
 KPIMON_GO_NEWER_FILE=$([ -f kpimon-go.tar ] && find Dockerfile control e2sm kpimon.go -type f -newer kpimon-go.tar -print -quit || true)
-if [ ! -f kpimon-go.tar ] || [ -n "$KPIMON_GO_NEWER_FILE" ]; then
-    docker build --network host -t 127.0.0.1:80/kpimon-go:latest .
+KPIMON_IMAGE_LABELS=$(docker image inspect --format '{{index .Config.Labels "patchset.sha256"}} {{index .Config.Labels "kpimon.timestamp-size8"}}' 127.0.0.1:80/kpimon-go:latest 2>/dev/null || true)
+if [ ! -f kpimon-go.tar ] || [ -n "$KPIMON_GO_NEWER_FILE" ] ||
+    [ "$KPIMON_IMAGE_LABELS" != "$KPIMON_PATCHSET_SHA256 ${KPIMON_TIMESTAMP_SIZE8:-false}" ]; then
+    docker build --network host --label "patchset.sha256=$KPIMON_PATCHSET_SHA256" \
+        --label "kpimon.timestamp-size8=${KPIMON_TIMESTAMP_SIZE8:-false}" -t 127.0.0.1:80/kpimon-go:latest .
     docker save -o kpimon-go.tar 127.0.0.1:80/kpimon-go:latest
     sudo chmod 755 kpimon-go.tar
     sudo chown "${SUDO_USER:-$USER}" kpimon-go.tar

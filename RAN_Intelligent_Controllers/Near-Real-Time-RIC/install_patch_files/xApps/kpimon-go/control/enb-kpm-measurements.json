@@ -1,0 +1,113 @@
+{
+  "doc": [
+    "KPM measurement lists of an E2 node that registers as an eNB (Global eNB ID), for kpimon-go.",
+    "e2mgr 6.0.6 stores no ranFunctions for an eNB, so kpimon cannot read the node's E2SM-KPM RAN Function Description;",
+    "these are the lists the ns3-e2-agent eNB advertises in it: cell = report style 1 (action format 1), ue = report",
+    "style 3 (action format 3), (measName, measId) in order, from ns3_e2_agent/schema/metric-map.v1.json rows kind enb",
+    "(ns3_e2_agent/tests/lint-metric-map.py checks the two stay equal)."
+  ],
+  "cell": [
+    {
+      "measName": "ns3.nodeId",
+      "measId": 1
+    },
+    {
+      "measName": "ns3.simTimeMs",
+      "measId": 2
+    },
+    {
+      "measName": "ns3.seq",
+      "measId": 3
+    },
+    {
+      "measName": "DRB.PdcpSduDelayDl",
+      "measId": 4
+    },
+    {
+      "measName": "ns3.cuUp.pDCPBytesUL",
+      "measId": 5
+    },
+    {
+      "measName": "ns3.cuUp.pDCPBytesDL",
+      "measId": 6
+    },
+    {
+      "measName": "ns3.cuCp.numActiveUes",
+      "measId": 7
+    },
+    {
+      "measName": "RRC.ConnMean",
+      "measId": 8
+    }
+  ],
+  "ue": [
+    {
+      "measName": "ns3.nodeId",
+      "measId": 1001
+    },
+    {
+      "measName": "ns3.simTimeMs",
+      "measId": 1002
+    },
+    {
+      "measName": "ns3.seq",
+      "measId": 1003
+    },
+    {
+      "measName": "ns3.imsi",
+      "measId": 1004
+    },
+    {
+      "measName": "DRB.PdcpSduVolumeDl",
+      "measId": 1005
+    },
+    {
+      "measName": "Tot.PdcpSduNbrDl",
+      "measId": 1006
+    },
+    {
+      "measName": "DRB.PdcpSduBitRateDl",
+      "measId": 1007
+    },
+    {
+      "measName": "DRB.PdcpSduDelayDl",
+      "measId": 1008
+    },
+    {
+      "measName": "ns3.cuUp.txPdcpPduLteRlc",
+      "measId": 1009
+    },
+    {
+      "measName": "ns3.cuUp.txPdcpPduBytesLteRlc",
+      "measId": 1010
+    },
+    {
+      "measName": "QosFlow.PdcpPduVolumeDL",
+      "measId": 1011
+    },
+    {
+      "measName": "DRB.PdcpPduNbrDl.Qos",
+      "measId": 1012
+    },
+    {
+      "measName": "DRB.EstabSucc.5QI",
+      "measId": 1013
+    },
+    {
+      "measName": "DRB.RelActNbr.5QI",
+      "measId": 1014
+    },
+    {
+      "measName": "ns3.l3.servCellId",
+      "measId": 1015
+    },
+    {
+      "measName": "ns3.l3.servSinrDb",
+      "measId": 1016
+    },
+    {
+      "measName": "ns3.l3.servSinr3gpp",
+      "measId": 1017
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""lint-metric-map.py [metric-map.v1.json] [--samples trace.ndjson]
+"""lint-metric-map.py [metric-map.v1.json] [--samples trace.ndjson] [--kpimon-enb enb-kpm-measurements.json]
 
 Lints the ns-3 -> E2SM-KPM metric map. Exit 0 = clean, 1 = findings.
 
@@ -14,6 +14,10 @@ Checks:
     has ns3.imsi at order 4;
   - no name overlaps the 9 names NIST's kpm_sim already writes
     (encode_kpm.cpp:30-40), which sit in cellMetrics since M3.
+With --kpimon-enb, also requires kpimon's eNB measurement lists
+(install_patch_files/xApps/kpimon-go/control/enb-kpm-measurements.json: e2mgr stores no RAN
+functions for an eNB, so kpimon takes them from that file) to equal this map's kind-enb rows:
+"cell" and "ue" = [(measName = kpm, measId)] in order, and no other key than doc, cell, ue.
 With --samples, also reports every src pointer that never resolves in any
 sample line of the matching kind (hello lines give the kind). Pointers through
 an array index (the neighbour slots, padded with noValue by design) are only
@@ -114,18 +118,38 @@ def check_samples(doc, path):
     return ["src never resolves: %s/%s/%s" % k for k, ok in sorted(seen.items()) if not ok and k not in padded]
 
 
+def check_kpimon_enb(doc, path):
+    """kpimon's eNB lists == the map's kind-enb rows per list, in order."""
+    cfg = json.load(open(path))
+    errs = []
+    if set(cfg) != {"doc", "cell", "ue"}:
+        errs.append(f"{os.path.basename(path)}: keys {sorted(cfg)}, want doc, cell, ue")
+    for name in ("cell", "ue"):
+        want = [{"measName": r["kpm"], "measId": r["measId"]}
+                for r in sorted((r for r in doc.get("rows", []) if r.get("kind") == "enb" and r.get("list") == name),
+                                key=lambda r: r["order"])]
+        if cfg.get(name) != want:
+            errs.append(f"{os.path.basename(path)}: list {name} differs from the map's enb/{name} rows")
+    return errs
+
+
 def main(argv):
     args = argv[1:]
-    samples = None
+    samples = kpimon_enb = None
     if "--samples" in args:
         i = args.index("--samples")
         samples = args[i + 1]
+        del args[i:i + 2]
+    if "--kpimon-enb" in args:
+        i = args.index("--kpimon-enb")
+        kpimon_enb = args[i + 1]
         del args[i:i + 2]
     path = args[0] if args else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "schema",
                                              "metric-map.v1.json")
     doc = json.load(open(path))
     errs = lint(doc)
     if samples: errs += check_samples(doc, samples)
+    if kpimon_enb: errs += check_kpimon_enb(doc, kpimon_enb)
     for e in errs: print("FAIL", e)
     n = {}
     for r in doc.get("rows", []): n["%s/%s" % (r.get("kind"), r.get("list"))] = n.get("%s/%s" % (r.get("kind"), r.get("list")), 0) + 1

@@ -1,0 +1,19 @@
+# KPI Monitor xApp (kpimon-go) patch set: every file additional_scripts/install_xapp_kpi_monitor.sh applies or installs
+# into the kpimon-go tree, in the order it does (the two *.timestamp-size8.patch files only with
+# KPIMON_TIMESTAMP_SIZE8=true; the image's kpimon.timestamp-size8 label records the choice). The image's patchset.sha256
+# label is the sha256 of this file followed by each listed file, in this order.
+e2sm/wrapper.c.patch
+e2sm/wrapper.h.patch
+e2sm/asn1/kpm2_0.asn.patch
+e2sm/headers/LogicalOR.h.patch
+e2sm/headers/MatchingCondItem-Choice.h.patch
+e2sm/headers/MatchingCondItem.h.patch
+e2sm/lib/LogicalOR.c.patch
+e2sm/lib/MatchingCondItem-Choice.c.patch
+e2sm/lib/MatchingCondItem.c.patch
+e2sm/asn1/kpm2_0.asn.timestamp-size8.patch
+e2sm/lib/TimeStamp.c.timestamp-size8.patch
+control/control.go.patch
+control/control.go.enb-measurements.patch
+control/types.go.patch
+control/enb-kpm-measurements.json
