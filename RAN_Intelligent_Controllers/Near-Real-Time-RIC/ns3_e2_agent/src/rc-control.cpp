@@ -3,8 +3,11 @@
 
 #include <sys/time.h>
 
+#include <cstring>
+
 #include "agent-log.hpp"
 #include "agent-stats.hpp"
+#include "e2-node-identity.hpp"
 #include "e2ap-builders.hpp"
 #include "rc-codec.h"
 
@@ -22,18 +25,31 @@ int64_t unix_ms() {
 }
 }  // namespace
 
-bool parse_target_octets(const uint8_t *o, size_t n, TargetCell &out, std::string &err) {
-  if (n != 9 || o[0] != 0x00) {
-    err = "target cell octets: want 9 octets 00|PLMN|gNB-ID|cell, got " + std::to_string(n);
+bool parse_target_nr_cgi(const uint8_t *o, size_t n, const std::array<uint8_t, 3> &plmn, TargetCell &out,
+                         std::string &err) {
+  uint8_t p[3];
+  uint64_t nci = 0;
+  char e[256] = {0};
+  if (rcc_decode_nr_cgi_strict(o, n, p, &nci, e, sizeof e) != 0) {
+    err = std::string("target ") + e;
     return false;
   }
-  out.gnbId = ((uint32_t)o[4] << 24) | ((uint32_t)o[5] << 16) | ((uint32_t)o[6] << 8) | o[7];
-  out.cellId = o[8];
+  if (memcmp(p, plmn.data(), 3) != 0) {
+    err = "target NR CGI: PLMN is not this node's";
+    return false;
+  }
+  uint64_t gnbId = nci >> 4;
+  if ((nci & 0xF) != kNrCellPart || gnbId < 1 || gnbId > 65535) {
+    err = "target NR CGI: NR Cell Identity is not gNB ID (an ns-3 cellId) || cell part 1";
+    return false;
+  }
+  out.gnbId = (uint32_t)gnbId;
+  out.cellId = (uint16_t)gnbId;
   return true;
 }
 
-RcControlPath::RcControlPath(int nodeId, SendE2 sendE2, SendIpc sendIpc)
-    : nodeId_(nodeId), sendE2_(std::move(sendE2)), sendIpc_(std::move(sendIpc)) {}
+RcControlPath::RcControlPath(int nodeId, const std::array<uint8_t, 3> &plmn, SendE2 sendE2, SendIpc sendIpc)
+    : nodeId_(nodeId), plmn_(plmn), sendE2_(std::move(sendE2)), sendIpc_(std::move(sendIpc)) {}
 
 void RcControlPath::on_request(const InboundPdu &p, int64_t afterSeq, bool ipcUp) {
   stats().ctlRx++;
@@ -64,7 +80,7 @@ void RcControlPath::on_request(const InboundPdu &p, int64_t afterSeq, bool ipcUp
   }
   TargetCell t;
   std::string terr;
-  if (!parse_target_octets(rc.targetOctets, rc.targetLen, t, terr)) {
+  if (!parse_target_nr_cgi(rc.targetOctets, rc.targetLen, plmn_, t, terr)) {
     stats().ctlRejDecode++;
     answer_failure(c, CauseRICrequest_control_message_invalid, terr.c_str());
     return;

@@ -36,6 +36,25 @@ void env_str(const char *name, std::string &out) {
   if (v && *v) out = v;
 }
 
+// "1" or "2,3,4": decimal cellIds in [1, 65535], no duplicates.
+bool parse_x2_peers(const std::string &v, std::vector<uint32_t> &out) {
+  out.clear();
+  size_t i = 0;
+  while (i <= v.size()) {
+    size_t j = v.find(',', i);
+    if (j == std::string::npos) j = v.size();
+    std::string t = v.substr(i, j - i);
+    if (t.empty() || t.size() > 5 || t.find_first_not_of("0123456789") != std::string::npos) return false;
+    long x = strtol(t.c_str(), nullptr, 10);
+    if (x < 1 || x > 65535) return false;
+    for (uint32_t p : out)
+      if (p == (uint32_t)x) return false;
+    out.push_back((uint32_t)x);
+    i = j + 1;
+  }
+  return !out.empty();
+}
+
 }  // namespace
 
 bool plmn_to_bcd(const std::string &p, std::array<uint8_t, 3> &out) {
@@ -74,8 +93,14 @@ bool load_config_from_env(Config &cfg) {
     ok = false;
   }
   long gnb = cfg.nodeId;
-  ok = env_int("E2_GNB_ID", 0, (1L << 29) - 1, gnb) && ok;
+  ok = env_int("E2_GNB_ID", 0, (1L << 32) - 1, gnb) && ok;
   cfg.gnbId = (uint32_t)gnb;
+  std::string peers;
+  env_str("E2_X2_PEERS", peers);
+  if (!parse_x2_peers(peers, cfg.x2Peers)) {
+    fprintf(stderr, "config: E2_X2_PEERS is required: comma-separated cellIds in [1, 65535], no duplicates\n");
+    ok = false;
+  }
   ok = env_int("E2_TERM_PORT", 1, 65535, cfg.termPort) && ok;
   ok = env_int("E2_RAN_FUNC_ID", 0, 4095, cfg.ranFuncId) && ok;
   env_str("E2_KPM_OID", cfg.kpmOid);

@@ -12,6 +12,7 @@
 #include <functional>
 
 #include "agent-config.hpp"
+#include "e2-setup-request.hpp"
 #include "e2ap-inbound.hpp"
 #include "sample-forwarder.hpp"
 #include "sctp-association.hpp"
@@ -23,7 +24,8 @@ class E2Session {
  public:
   enum class State { Holdoff, Connecting, SetupSent, Ready };
 
-  E2Session(const Config &cfg, const Bytes &ranFuncDef, int64_t nowMs);
+  // funcs: the node's RAN functions (node_ran_functions), announced in the setup and in every service update.
+  E2Session(const Config &cfg, const std::vector<RanFunctionSpec> &funcs, int64_t nowMs);
   // Timer work: hold-off expiry, connect timeout/retry, setup timeout.
   void tick(int64_t nowMs);
   // Socket to poll (-1 if none) and the events wanted.
@@ -60,7 +62,7 @@ class E2Session {
   bool send_report(Subscription &sub, const EncodedReport &rep);
 
   const Config &cfg_;
-  const Bytes &ranFuncDef_;
+  const std::vector<RanFunctionSpec> &funcs_;
   State state_ = State::Holdoff;
   int64_t deadlineMs_ = 0;  // hold-off end, connect timeout, retry time or setup timeout
   bool waitingRetry_ = false;

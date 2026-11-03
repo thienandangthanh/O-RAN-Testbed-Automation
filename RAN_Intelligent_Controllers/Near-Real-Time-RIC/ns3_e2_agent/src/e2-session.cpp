@@ -18,7 +18,8 @@ const char *state_name(E2Session::State s) {
 }
 }  // namespace
 
-E2Session::E2Session(const Config &cfg, const Bytes &ranFuncDef, int64_t nowMs) : cfg_(cfg), ranFuncDef_(ranFuncDef) {
+E2Session::E2Session(const Config &cfg, const std::vector<RanFunctionSpec> &funcs, int64_t nowMs)
+    : cfg_(cfg), funcs_(funcs) {
   deadlineMs_ = nowMs + cfg.holdoffS * 1000LL;
   set_state(State::Holdoff);
   ALOG_I("HOLDOFF %d s before the first connect", cfg.holdoffS);
@@ -78,7 +79,7 @@ void E2Session::on_poll(short revents, int64_t nowMs) {
       return;
     }
     Bytes setup;
-    if (!build_setup_request(cfg_, ranFuncDef_, setup, err)) agent_exit(1, "E2SetupRequest: " + err);
+    if (!build_setup_request(cfg_, funcs_, 1, setup, err)) agent_exit(1, "E2SetupRequest: " + err);
     if (sctp_.send(setup, err) != SctpAssociation::SendResult::Sent) {
       attempt_failed("sending E2SetupRequest failed " + err, nowMs);
       return;
@@ -136,7 +137,7 @@ void E2Session::handle_pdu(const Bytes &pdu) {
     case InboundPdu::ServiceQuery: {
       stats().serviceQueries++;
       Bytes b;
-      if (build_service_update(cfg_, ranFuncDef_, p.transactionId < 0 ? 0 : p.transactionId, b, err))
+      if (build_service_update(funcs_, p.transactionId < 0 ? 0 : p.transactionId, b, err))
         send_ctrl(b, "RICserviceUpdate");
       else ALOG_E("service update: %s", err.c_str());
       break;

@@ -1,6 +1,7 @@
-// Outbound E2AP PDUs. Setup request, subscription response, indication and
-// service update come from NIST's libe2sim generators (unmodified) and are
-// post-edited in place before encoding; the delete response is agent-owned.
+// Outbound E2AP PDUs after setup (the E2SetupRequest is in e2-setup-request.hpp).
+// Subscription response and indication come from NIST's libe2sim generators
+// (unmodified) and are post-edited in place before encoding; the others are
+// agent-owned.
 #ifndef NS3_E2_AGENT_E2AP_BUILDERS_HPP
 #define NS3_E2_AGENT_E2AP_BUILDERS_HPP
 
@@ -9,13 +10,9 @@
 
 #include "agent-config.hpp"
 #include "asn-util.hpp"
+#include "e2-setup-request.hpp"
 
 namespace agent {
-
-// E2SetupRequest: generator output with GlobalE2node gNB identity overwritten
-// (PLMN BCD, 29-bit gNB-ID, bits_unused 3), our OID, definition and revision;
-// gNB agents also carry the 5-byte cell key in e2nodeComponentRequestPart (N5).
-bool build_setup_request(const Config &cfg, const Bytes &ranFuncDef, Bytes &out, std::string &err);
 
 // RICsubscriptionResponse: the generator's admitted list (its hard-coded
 // RANfunctionID 147 replaced with the request's function ID) plus, when
@@ -35,10 +32,10 @@ bool build_subscription_failure(long requestorId, long instanceId, long ranFuncI
 bool build_subscription_delete_response(long requestorId, long instanceId, long ranFuncId, Bytes &out,
                                         std::string &err);
 
-// RICserviceUpdate answering a RICserviceQuery: generator output with our
-// function ID, OID and revision restored and the query's TransactionID added.
-bool build_service_update(const Config &cfg, const Bytes &ranFuncDef, long transactionId, Bytes &out,
-                          std::string &err);
+// RICserviceUpdate answering a RICserviceQuery (agent-owned builder; E2AP
+// v03.00 9.1.1.4): the query's TransactionID and every RAN function of the
+// node as RANfunctionsModified.
+bool build_service_update(const std::vector<RanFunctionSpec> &funcs, long transactionId, Bytes &out, std::string &err);
 
 // RICcontrolAcknowledge (agent-owned builder; E2AP v03.00 9.1.1.9): RIC Request
 // ID, RAN Function ID, RIC Call Process ID if the request had one, and the

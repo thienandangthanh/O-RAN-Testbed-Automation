@@ -1,0 +1,25 @@
+x2ap_codec: sources of libx2ap_codec.so
+
+asn/x2ap-v19.1.0.asn
+  The six X2AP ASN.1 modules of 3GPP TS 36.423 V19.1.0 (2026-02) (ETSI TS 136 423 V19.1.0), clause 9.3:
+  X2AP-PDU-Descriptions, X2AP-PDU-Contents, X2AP-IEs, X2AP-CommonDataTypes, X2AP-Constants, X2AP-Containers.
+  Extracted from ts_136423v190100p.pdf (sha256 c962126da5f3b3c2d1155babf96e3b754ff6b577216eb79a05668dedc42cd0a1) with
+    pdftotext -layout ts_136423v190100p.pdf l.txt   (poppler)
+    python3 extract-x2ap-asn.py l.txt asn/x2ap-v19.1.0.asn
+  The script keeps the text between the '-- ASN1START' and '-- ASN1STOP' markers, drops the page header and footer
+  lines, and joins back the 46 lines the PDF wrapped: 20 identifiers split at a hyphen, 3 split '--' comment
+  markers and 23 comments continued on a column-0 line. Every join was checked by hand.
+  sha256 0f630bfc432ef611343f3656ddac1104da0e28d5c6d3cef5751f2a80d53c0946
+
+asn1c
+  mouse07410/asn1c 30d7a84e44bb478e360a31202b06045f446e11be (vlm_master, 2023-08-28), the commit whose skeleton
+  runtime equals the one in NIST's e2-interface e2sim/asn1c tree (197 of its 198 files; asn_config.h is generated).
+  Earlier commits encode an APER length with SIZE (0..65535) (every X2AP ProtocolIE-Container) in one octet
+  instead of the two octets of X.691 11.9.4.1 (fixed upstream by 9f198236 and 24247e28, 2022-07-15).
+  Options: -fcompound-names -fno-include-deps -findirect-choice -gen-APER -no-gen-OER -no-gen-example
+  The generated C is not committed; the image build generates it from asn/x2ap-v19.1.0.asn.
+
+x2ap-codec.c, x2ap-codec.h
+  The agent's wrapper (x2c_*). Built with -fvisibility=hidden, so only x2c_* leave the library.
+  Cross-checked against the independent codec (tools/asn1-indep, pycrate 0.8.1): the ENDCX2SetupRequest of the
+  probe's en-gNB 0x7F000001 and eNB 0xFFFFE and the MeasurementTimingConfiguration for NR-ARFCN 633333 are byte-equal.

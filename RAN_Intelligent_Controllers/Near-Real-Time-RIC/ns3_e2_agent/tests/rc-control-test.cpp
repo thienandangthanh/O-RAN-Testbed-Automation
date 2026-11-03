@@ -1,7 +1,9 @@
 // Unit test of the RC control path (src/rc-control.cpp) and the RC codec,
 // driven by real RICcontrolRequest content: the E2SM-RC header/message octets
 // rc a2282ee sent in the pre-M8 probe (tests/fixtures/rc-control-requests.hex,
-// "<frame> <header_hex> <message_hex>"). Each case prints PASS/FAIL <name>;
+// "<frame> <header_hex> <message_hex>"), whose target is the pre-R-3 9-octet
+// form, re-encoded with spec NR CGI targets (plan R-3; independent values from
+// pycrate). Each case prints PASS/FAIL <name>;
 // exit 0 only if all pass. It also prints the ACK's RIC Control Outcome octets
 // (OUTCOME_HEX) and the whole ACK PDU (ACK_PDU_HEX) for the gate to decode
 // with the independent decoder (tools/rc-decode) and tshark.
@@ -132,7 +134,7 @@ struct Harness {
   std::vector<Bytes> e2;
   std::vector<std::string> ipc;
   bool ipcUp = true;
-  RcControlPath rc{2, [this](const Bytes &b, const char *) { e2.push_back(b); },
+  RcControlPath rc{2, {0x00, 0xF1, 0x10}, [this](const Bytes &b, const char *) { e2.push_back(b); },
                    [this](const std::string &l) {
                      if (!ipcUp) return false;
                      ipc.push_back(l);
@@ -173,36 +175,53 @@ int main(int argc, char **argv) {
   verdict("fixture-loaded", !fx.empty(), std::to_string(fx.size()) + " PDUs");
   if (fx.empty()) return 1;
 
-  // Every fixture PDU decodes with the agent's codec: style 3, action 1, cell 3, and
-  // AMF-UE-NGAP-ID k+1 on line k (the probe numbered its calls; tools/rc-decode agrees).
+  // Every fixture PDU decodes with the agent's codec: style 3, action 1, AMF-UE-NGAP-ID k+1 on line k (the probe
+  // numbered its calls; tools/rc-decode agrees), and the M8-era target 00|PLMN|00000000|03.
+  const Bytes m8Target = from_hex("0000f1100000000003");
   int good = 0;
   for (size_t k = 0; k < fx.size(); k++) {
     auto &p = fx[k];
     rcc_control c;
     char err[256];
-    TargetCell t;
-    std::string terr;
     if (rcc_decode_control(p.first.data(), p.first.size(), p.second.data(), p.second.size(), &c, err, sizeof err) == 0 &&
-        c.style == 3 && c.action == 1 && c.amfUeNgapId == k + 1 && parse_target_octets(c.targetOctets, c.targetLen, t, terr) &&
-        t.cellId == 3 && t.gnbId == 0)
+        c.style == 3 && c.action == 1 && c.amfUeNgapId == k + 1 && Bytes(c.targetOctets, c.targetOctets + c.targetLen) == m8Target)
       good++;
   }
   verdict("fixture-decodes", good == (int)fx.size(), std::to_string(good) + "/" + std::to_string(fx.size()));
 
-  const Bytes &hdr = fx[0].first, &msg = fx[0].second;
-  // N5 key 0000000202 (gNB 2, cell 2) as rc sends it: 00 | PLMN | key.
-  const uint8_t key[9] = {0x00, 0x00, 0xF1, 0x10, 0x00, 0x00, 0x00, 0x02, 0x02};
+  const Bytes &hdr = fx[0].first, &msgM8 = fx[0].second;
   uint8_t buf[256];
-  long n = rcc_test_reencode_target(msg.data(), msg.size(), key, sizeof key, buf, sizeof buf);
-  Bytes msg202(buf, buf + (n > 0 ? n : 0));
+  auto with_target = [&](const char *hex) {
+    Bytes t = from_hex(hex);
+    long n = rcc_test_reencode_target(msgM8.data(), msgM8.size(), t.data(), t.size(), buf, sizeof buf);
+    return Bytes(buf, buf + (n > 0 ? n : 0));
+  };
+  // APER NR-CGI of gNB 3 (PLMN 00F110, NCI 0x000000031, 4 zero pad bits), the form rc sends after the R-3 switch.
+  const Bytes msg = with_target("0000f1100000000310");
   {
-    rcc_control c;
-    char err[256];
     TargetCell t;
     std::string terr;
-    bool ok = n > 0 && rcc_decode_control(hdr.data(), hdr.size(), msg202.data(), msg202.size(), &c, err, sizeof err) == 0 &&
-              parse_target_octets(c.targetOctets, c.targetLen, t, terr) && t.cellId == 2 && t.gnbId == 2;
-    verdict("target-key-0000000202", ok);
+    Bytes o = from_hex("0000f1100000000310");
+    bool ok = !msg.empty() && parse_target_nr_cgi(o.data(), o.size(), {0x00, 0xF1, 0x10}, t, terr) && t.gnbId == 3 &&
+              t.cellId == 3;
+    verdict("nrcgi-target-gnb3", ok, terr);
+  }
+  {  // the N5 form 00|PLMN|gNB-ID|cell (gNB 3 cell 3): nonzero padding, no canonical NR CGI -> refused
+    Harness h;
+    h.request(control_request(17, 1, 3, hdr, with_target("0000f1100000000303"), -1));
+    verdict("n5-target-refused", one_failure(h, CauseRICrequest_control_message_invalid, 17));
+  }
+  {  // a request exactly as rc sent it in M8 -> refused
+    Harness h;
+    h.request(control_request(18, 1, 3, hdr, msgM8, -1));
+    verdict("m8-capture-refused", one_failure(h, CauseRICrequest_control_message_invalid, 18));
+  }
+  {  // another PLMN (00F220) or cell part 2 -> refused
+    Harness h1, h2;
+    h1.request(control_request(19, 1, 3, hdr, with_target("0000f2200000000310"), -1));
+    h2.request(control_request(19, 2, 3, hdr, with_target("0000f1100000000320"), -1));
+    verdict("nrcgi-wrong-plmn-or-cell-part-refused", one_failure(h1, CauseRICrequest_control_message_invalid, 19) &&
+                                                          one_failure(h2, CauseRICrequest_control_message_invalid, 19));
   }
 
   {  // RAN function 2 (KPM) -> ran-function-id-invalid, nothing to ns-3
@@ -230,12 +249,13 @@ int main(int argc, char **argv) {
   }
   {  // forwarded control line, then applied -> ACK with ControlOutcome Format 1
     Harness h;
-    h.request(control_request(15, 2, 3, hdr, msg202, -1), 41);
+    h.request(control_request(15, 2, 3, hdr, msg, -1), 41);
     nlohmann::json j = h.ipc.empty() ? nlohmann::json() : nlohmann::json::parse(h.ipc[0]);
     bool fwd = h.e2.empty() && h.ipc.size() == 1 && j.value("type", "") == "control" && j.value("nodeId", 0) == 2 &&
-               j.value("ctlId", 0) == 1 && j.value("imsi", 0) == 1 && j.value("targetCellId", 0) == 2 &&
+               j.value("ctlId", 0) == 1 && j.value("imsi", 0) == 1 && j.value("targetCellId", 0) == 3 &&
+               j["diag"].value("targetGnbId", 0) == 3 &&
                j.value("afterSeq", 0) == 41 && j["ric"].value("requestorId", 0) == 15 && h.rc.pending() == 1;
-    verdict("forward-control-line", fwd, h.ipc.empty() ? "" : h.ipc[0].substr(0, h.ipc[0].size() - 1));
+    verdict("nrcgi-applied-path", fwd, h.ipc.empty() ? "" : h.ipc[0].substr(0, h.ipc[0].size() - 1));
     h.ack(1, "applied");
     Answer a = h.e2.size() == 1 ? decode_answer(h.e2[0]) : Answer{};
     bool ok = a.ok && a.kind == "ack" && a.reqId == 15 && a.instId == 2 && a.func == 3 && a.outcome == Bytes{0x00, 0x00} &&

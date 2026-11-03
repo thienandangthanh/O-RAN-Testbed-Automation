@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace agent {
 
@@ -16,7 +17,11 @@ struct Config {
   int termPort = 36422;           // E2_TERM_PORT
   std::string plmn = "00101";     // E2_PLMN: MCC (3 digits) + MNC (2 or 3 digits)
   std::array<uint8_t, 3> plmnBcd{};  // derived 3GPP TS 38.413 BCD form
-  uint32_t gnbId = 0;             // E2_GNB_ID (default E2_NODE_ID), 29-bit value
+  uint32_t gnbId = 0;             // E2_GNB_ID (default E2_NODE_ID): a gnb's 32-bit gNB ID (plan R-3: = ns-3 cellId);
+                                  // an enb's macro eNB ID is E2_NODE_ID (20 bits)
+  // E2_X2_PEERS (required): comma-separated ns-3 cellIds of the node's X2 neighbours, one X2 E2 node component
+  // each (E2AP v03.00 §9.2.32): a gnb names its master eNB, an enb names every en-gNB.
+  std::vector<uint32_t> x2Peers;
   long ranFuncId = 2;             // E2_RAN_FUNC_ID
   std::string kpmOid = "1.3.6.1.4.1.53148.1.3.2.2";  // E2_KPM_OID
   int sctpSrcPort = 0;            // E2_SCTP_SRC_PORT (0 = ephemeral)

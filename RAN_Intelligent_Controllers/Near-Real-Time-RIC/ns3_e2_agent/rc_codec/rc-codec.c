@@ -12,6 +12,7 @@
 #include "E2SM-RC-ControlMessage-Format1-Item.h"
 #include "E2SM-RC-ControlOutcome.h"
 #include "E2SM-RC-ControlOutcome-Format1.h"
+#include "NR-CGI.h"
 #include "RANParameter-STRUCTURE.h"
 #include "RANParameter-STRUCTURE-Item.h"
 #include "RANParameter-Value.h"
@@ -108,6 +109,33 @@ RCC_API int rcc_decode_control(const uint8_t *hdr, size_t hdrLen, const uint8_t 
 done:
   ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, h);
   ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlMessage, m);
+  return rc;
+}
+
+RCC_API int rcc_decode_nr_cgi_strict(const uint8_t *buf, size_t len, uint8_t plmn[3], uint64_t *nci, char *err,
+                                     size_t errLen) {
+  NR_CGI_t *c = NULL;
+  int rc = -1;
+  uint8_t again[16];
+  if (len != 9) {
+    fail(err, errLen, "NR CGI: not 9 octets");
+  } else if (!decode_clean(&asn_DEF_NR_CGI, (void **)&c, buf, len)) {
+    fail(err, errLen, "NR CGI: APER decode failed or trailing octets");
+  } else if (c->pLMNIdentity.size != 3 || c->nRCellIdentity.size != 5 || c->nRCellIdentity.bits_unused != 4) {
+    fail(err, errLen, "NR CGI: PLMN or NR Cell Identity of the wrong size");
+  } else {
+    asn_enc_rval_t r = aper_encode_to_buffer(&asn_DEF_NR_CGI, NULL, c, again, sizeof again);
+    if (r.encoded < 0 || (size_t)((r.encoded + 7) / 8) != len || memcmp(again, buf, len) != 0) {
+      fail(err, errLen, "NR CGI: does not re-encode to the same octets (nonzero padding or a non-canonical form)");
+    } else {
+      uint64_t v = 0;
+      for (int i = 0; i < 5; i++) v = (v << 8) | c->nRCellIdentity.buf[i];
+      memcpy(plmn, c->pLMNIdentity.buf, 3);
+      *nci = v >> 4;
+      rc = 0;
+    }
+  }
+  ASN_STRUCT_FREE(asn_DEF_NR_CGI, c);
   return rc;
 }
 

@@ -22,7 +22,7 @@ typedef struct rcc_control {
   long style;                /* ric-Style-Type */
   long action;               /* ric-ControlAction-ID */
   uint64_t amfUeNgapId;      /* UEID gNB-UEID amf-UE-NGAP-ID */
-  uint8_t targetOctets[16];  /* RAN parameter 4 (NR CGI) valueOctS under 1/2/3 */
+  uint8_t targetOctets[16];  /* RAN parameter 4 (NR CGI) valueOctS under 1/2/3, checked by rcc_decode_nr_cgi_strict */
   size_t targetLen;
 } rcc_control;
 
@@ -35,6 +35,22 @@ typedef struct rcc_control {
  */
 int rcc_decode_control(const uint8_t *hdr, size_t hdrLen, const uint8_t *msg, size_t msgLen,
                        rcc_control *out, char *err, size_t errLen);
+
+/*
+ * Strict NR CGI (E2SM common NR-CGI, APER, the value of RAN parameter 4): exactly 9 octets that decode cleanly and
+ * re-encode to the same 9 octets, so a value with nonzero padding bits is refused. On success writes the 3 PLMN
+ * octets and the 36-bit NR Cell Identity and returns 0; otherwise -1 with the reason in err.
+ */
+int rcc_decode_nr_cgi_strict(const uint8_t *buf, size_t len, uint8_t plmn[3], uint64_t *nci, char *err,
+                             size_t errLen);
+
+/*
+ * E2SM-RC RAN Function Definition of RAN function 3 (APER), from rc-codec-ran-function-definition.c: CONTROL
+ * Style 3 action 1 and Style 5 action 3, each with RAN parameters 1-4. Returns the number of octets written to buf,
+ * or -1. rcc_ran_function_oid() is the E2SM-RC OID announced with it.
+ */
+long rcc_encode_ran_function_definition(uint8_t *buf, size_t cap);
+const char *rcc_ran_function_oid(void);
 
 /*
  * Encodes E2SM-RC-ControlOutcome Format 1 with an empty ranP-List into buf.

@@ -137,7 +137,6 @@ void handle_line(const std::string &line, const Config &cfg, SampleEncoder &enc,
 }  // namespace
 
 int main() {
-  unsetenv("RAN_FUNCTION_OP_TYPE");  // keeps NIST's service-update generator on "Modified"
   setvbuf(stderr, nullptr, _IOLBF, 0);
   Config cfg;
   if (!load_config_from_env(cfg)) return 1;
@@ -151,9 +150,15 @@ int main() {
   names.description = "ns-O-RAN KPM map v1 " + map.sha256.substr(0, 8);
   Bytes def;
   if (!encode_ran_function_description(names, map.cell, map.ue, def, err)) agent_exit(1, "ranfunc: " + err);
-  ALOG_I("node %d kind %s gNB-ID %u PLMN %s -> e2term %s:%d (src port %d); RAN function %ld OID %s", cfg.nodeId,
-         cfg.kind.c_str(), cfg.gnbId, cfg.plmn.c_str(), cfg.termAddr.c_str(), cfg.termPort, cfg.sctpSrcPort,
-         cfg.ranFuncId, cfg.kpmOid.c_str());
+  std::vector<RanFunctionSpec> funcs;
+  if (!node_ran_functions(cfg, def, funcs, err)) agent_exit(1, err);
+  std::string peers, fl;
+  for (uint32_t p : cfg.x2Peers) peers += (peers.empty() ? "" : ",") + std::to_string(p);
+  for (const auto &f : funcs) fl += (fl.empty() ? "" : " ") + std::to_string(f.id) + "/" + f.oid;
+  ALOG_I("node %d kind %s %s %u PLMN %s X2 neighbours %s -> e2term %s:%d (src port %d); RAN functions %s",
+         cfg.nodeId, cfg.kind.c_str(), cfg.kind == "gnb" ? "en-gNB ID" : "macro eNB ID",
+         cfg.kind == "gnb" ? cfg.gnbId : (uint32_t)cfg.nodeId, cfg.plmn.c_str(), peers.c_str(), cfg.termAddr.c_str(),
+         cfg.termPort, cfg.sctpSrcPort, fl.c_str());
   ALOG_I("metric map %s sha256 %s: cell %zu, ue %zu items; definition %zu octets", cfg.metricMapPath.c_str(),
          map.sha256.c_str(), map.cell.size(), map.ue.size(), def.size());
 
@@ -172,10 +177,10 @@ int main() {
   timerfd_settime(tfd, 0, &its, nullptr);
 
   SampleEncoder enc(cfg, map);
-  E2Session e2(cfg, def, now_ms());
+  E2Session e2(cfg, funcs, now_ms());
   IpcState ist;
   RcControlPath rc(
-      cfg.nodeId, [&e2](const Bytes &pdu, const char *what) { e2.send_ctrl(pdu, what); },
+      cfg.nodeId, cfg.plmnBcd, [&e2](const Bytes &pdu, const char *what) { e2.send_ctrl(pdu, what); },
       [&ipc](const std::string &line) { return ipc.send_line(line); });
   e2.set_control_handler([&](const InboundPdu &p) {
     rc.on_request(p, stats().lastSeq, ipc.client_fd() >= 0 && ist.helloSeen);
