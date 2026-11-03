@@ -1,0 +1,11 @@
+# Traffic Steering xApp patch set, applied in this order with git apply to the commit pinned in commit_hashes.json
+# (additional_scripts/install_xapp_traffic_steering.sh). Paths are relative to install_patch_files/xApps/ts/; each
+# patch names the file it changes in its diff header. The installer first restores every file the patches change,
+# then applies them in order. The trafficxapp image's patchset.sha256 label derives from this file and the files
+# it lists.
+# A1 policy body sent as a JSON string by the Go a1mediator (3.x)
+src/ts_xapp/ts_xapp.cpp.patch
+# do-nothing default RMR handler (a stray 12041/12042 is otherwise freed twice by xapp-frame-cpp 2.3.6)
+src/ts_xapp/ts_xapp.cpp.default_handler.patch
+# cell keys only from NR nodes (en_gnb_/gnb_ meids), read from the hex of the binary X2 request part
+src/ts_xapp/ts_xapp.cpp.nr_cell_map.patch

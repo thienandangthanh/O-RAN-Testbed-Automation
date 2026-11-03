@@ -1,0 +1,52 @@
+diff --git a/src/ts_xapp/ts_xapp.cpp b/src/ts_xapp/ts_xapp.cpp
+index 63d4f1c..d62f3d8 100644
+--- a/src/ts_xapp/ts_xapp.cpp
++++ b/src/ts_xapp/ts_xapp.cpp
+@@ -48,6 +48,7 @@
+ #include <vector>
+ #include <string>
+ #include <unordered_map>
++#include <regex>
+ #include<deque>
+ #include <rapidjson/document.h>
+ #include <rapidjson/writer.h>
+@@ -334,22 +335,24 @@ struct NodebHandler : public BaseReaderHandler<UTF8<>, NodebHandler> {
+ 		}
+ 		else if (curr_key.compare("e2nodeComponentRequestPart") == 0) {
+ 			//std::cout << str<<"\n";
+-			auto message = base64_decode(str);
++			// Only an NR node has PSCell targets (3GPP TS 37.340 10.5.1): keys come from an en_gnb_ or gnb_ meid
++			// (<type>_<mcc>_<mnc>_<gNB ID hex>); a node of any other RAN type (enB_macro_ ...) contributes none.
++			static const std::regex nr_meid("^(en_gnb|gnb)_[0-9]{3}_[0-9]{3}_([0-9a-f]+)$");
++			std::smatch nr_match;
++			if (!std::regex_match(meid, nr_match, nr_meid)) {
++				return true;
++			}
++			// The request part is the node's binary APER setup message: its cells are read from its uppercase hex.
++			auto request_part = base64_decode(str);
++			static const char hex_digits[] = "0123456789ABCDEF";
++			std::string message;
++			for (unsigned char c : request_part) {
++				message.push_back(hex_digits[c >> 4]);
++				message.push_back(hex_digits[c & 0x0F]);
++			}
+ 			//std::cout << message<<"\n";
+-			int len = meid.length();
+-			//std::cout << "\n meid = " << meid;
+-			int counter = 0;
+-				for (int i = 0; i <len; i++ ){
+-					if (meid[i] == '_') {
+-						counter++;
+-					}
+-					if( counter == 3) {
+-						counter = i + 1;
+-						break;
+-					}
+-				}
+-				std::string last_matching_bits = meid.substr(counter, meid.length());
+-				len = last_matching_bits.size();
++				std::string last_matching_bits = nr_match[2].str();
++				int len = last_matching_bits.size();
+ 				char b;
+ 
+ 				for (int i = 0; i < len; i++) {

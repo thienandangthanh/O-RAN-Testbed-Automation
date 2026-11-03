@@ -32,6 +32,11 @@ echo "# Script: $(realpath "$0") $@"
 
 # Run this script to build and deploy the Traffic Steering xApp (trafficxapp) in the Near-Real-Time RIC.
 # More information can be found at: https://github.com/o-ran-sc/ric-app-ts and https://docs.o-ran-sc.org/projects/o-ran-sc-ric-app-ts/en/latest/user-guide.html
+#
+# Modified (2026-11): the Testbed patch set listed in install_patch_files/xApps/ts/patches.manifest is applied in
+# order, after every file the patches change is restored to the checked-out commit (the one pinned in
+# commit_hashes.json). The image is labelled patchset.sha256 (sha256 of patches.manifest followed by each listed
+# patch, in manifest order), and is rebuilt whenever that label differs.
 
 # Exit immediately if a command fails
 set -e
@@ -83,18 +88,33 @@ if [ -f "routes.txt" ] && grep -q "service-ricxapp-ad-rmr:4560" routes.txt; then
     sed -i 's/service-ricxapp-ad-rmr:4560/service-ricxapp-ad-rmr.ricxapp.svc.cluster.local:4560/g' routes.txt
 fi
 
-# The Go a1mediator (3.x) sends the A1 policy body as a JSON string under "payload"; the TS xApp reads only an
-# object there, so the threshold would never be set. The patch also parses the string form. Restoring first
-# rewrites the source, so the image below is rebuilt from the patched tree.
-echo "Patching src/ts_xapp/ts_xapp.cpp to accept the A1 policy body as a JSON string..."
-git restore src/ts_xapp/ts_xapp.cpp
-git apply --verbose "$PARENT_DIR/install_patch_files/xApps/ts/src/ts_xapp/ts_xapp.cpp.patch"
-
-# rtmgr routes RIC control acks (12041/12042) at subid -1 to every xApp. The TS xApp registers no handler for them,
-# and xapp-frame-cpp 2.3.6 then frees the unmatched buffer twice (glibc aborts the pod). A do-nothing default
-# handler makes the framework release the buffer once.
-echo "Patching src/ts_xapp/ts_xapp.cpp with a default RMR handler that drops unhandled message types..."
-git apply --verbose "$PARENT_DIR/install_patch_files/xApps/ts/src/ts_xapp/ts_xapp.cpp.default_handler.patch"
+# The patch set, in manifest order: the Go a1mediator (3.x) sends the A1 policy body as a JSON string under
+# "payload", which the TS xApp reads only as an object (the threshold would never be set); rtmgr routes RIC control
+# acks (12041/12042) at subid -1 to every xApp, and xapp-frame-cpp 2.3.6 frees an unmatched buffer twice (glibc
+# aborts the pod) unless a do-nothing default handler is registered; and the cell map takes keys only from NR nodes
+# (en_gnb_/gnb_ meids), read from the hex of the binary X2 request part (only NR cells are PSCell targets, 3GPP TS
+# 37.340 10.5.1). Restoring first rewrites the sources, so the image below is rebuilt from the patched tree.
+TS_PATCH_DIR="$PARENT_DIR/install_patch_files/xApps/ts"
+mapfile -t TS_PATCHES < <(grep -vE '^\s*(#|$)' "$TS_PATCH_DIR/patches.manifest")
+if [ "${#TS_PATCHES[@]}" -eq 0 ]; then
+    echo "ERROR: $TS_PATCH_DIR/patches.manifest lists no patch"
+    exit 1
+fi
+TS_PATCHSET_SHA256=$( (cat "$TS_PATCH_DIR/patches.manifest" && for p in "${TS_PATCHES[@]}"; do cat "$TS_PATCH_DIR/$p"; done) | sha256sum | cut -d' ' -f1)
+mapfile -t TS_PATCHED_FILES < <(for p in "${TS_PATCHES[@]}"; do git apply --numstat "$TS_PATCH_DIR/$p" | cut -f3; done | sort -u)
+for f in "${TS_PATCHED_FILES[@]}"; do
+    echo "Restoring $f to $(git rev-parse --short HEAD)..."
+    if git cat-file -e "HEAD:$f" 2>/dev/null; then
+        git checkout -q HEAD -- "$f"
+    else
+        rm -f "$f"
+    fi
+done
+for p in "${TS_PATCHES[@]}"; do
+    echo "Applying $p..."
+    git apply --verbose "$TS_PATCH_DIR/$p"
+done
+echo "TS_PATCHSET_SHA256=$TS_PATCHSET_SHA256"
 
 echo "Creating and modifying the configuration file xapp-descriptor/config-file_updated.json"
 # Check if jq is installed; if not, install it
@@ -138,8 +158,9 @@ if [ -z "$FIXED_DOCKER_PERMS" ]; then
 fi
 
 TRAFFICXAPP_NEWER_FILE=$([ -f trafficxapp.tar ] && find Dockerfile CMakeLists.txt assets src -type f -newer trafficxapp.tar -print -quit || true)
-if [ ! -f trafficxapp.tar ] || [ -n "$TRAFFICXAPP_NEWER_FILE" ]; then
-    docker build --network host -t 127.0.0.1:80/trafficxapp:latest .
+TRAFFICXAPP_IMAGE_LABEL=$(docker image inspect --format '{{index .Config.Labels "patchset.sha256"}}' 127.0.0.1:80/trafficxapp:latest 2>/dev/null || true)
+if [ ! -f trafficxapp.tar ] || [ -n "$TRAFFICXAPP_NEWER_FILE" ] || [ "$TRAFFICXAPP_IMAGE_LABEL" != "$TS_PATCHSET_SHA256" ]; then
+    docker build --network host --label "patchset.sha256=$TS_PATCHSET_SHA256" -t 127.0.0.1:80/trafficxapp:latest .
     docker save -o trafficxapp.tar 127.0.0.1:80/trafficxapp:latest
     sudo chmod 755 trafficxapp.tar
     sudo chown "${SUDO_USER:-$USER}" trafficxapp.tar
@@ -147,7 +168,7 @@ if [ ! -f trafficxapp.tar ] || [ -n "$TRAFFICXAPP_NEWER_FILE" ]; then
     # Import the image into the containerd container runtime
     sudo ctr -n=k8s.io image import trafficxapp.tar
 else
-    echo "Traffic Steering xApp (trafficxapp) is already built, skipping."
+    echo "Traffic Steering xApp (trafficxapp) is already built with patch set $TS_PATCHSET_SHA256, skipping."
 fi
 
 echo "Onboarding the Traffic Steering xApp (trafficxapp)..."
