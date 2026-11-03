@@ -313,6 +313,9 @@ else
     sudo cp "ric-dep/RECIPE_EXAMPLE/$RIC_YAML_FILE_NAME" "ric-dep/RECIPE_EXAMPLE/$RIC_YAML_FILE_NAME_UPDATED"
     sudo chown "${SUDO_USER:-$USER}" "ric-dep/RECIPE_EXAMPLE/$RIC_YAML_FILE_NAME_UPDATED"
     sudo ./install_scripts/revise_example_recipe_yaml.sh "ric-dep/RECIPE_EXAMPLE/$RIC_YAML_FILE_NAME_UPDATED"
+    # Build the E2 Manager with its patch set (the en-gNB Global E2 Node ID fix), import it into containerd and point
+    # the recipe at it, so the helm install below deploys it.
+    ./install_scripts/install_e2mgr_patched.sh --recipe "ric-dep/RECIPE_EXAMPLE/$RIC_YAML_FILE_NAME_UPDATED"
     if [ "$E2_TERM_PORT" != "36422" ]; then
         sudo ./install_scripts/revise_deployment_for_e2_port.sh
     fi

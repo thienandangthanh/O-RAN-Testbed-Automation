@@ -1,0 +1,4 @@
+# E2 Manager patch set, applied in this order with git apply to the commit pinned in commit_hashes.json
+# (install_scripts/install_e2mgr_patched.sh). The image tag and its patchset.sha256 label derive from this file
+# and the files it lists.
+0001-read-en-gnb-global-e2-node-id-from-global-en-gnb-id.patch

@@ -1,0 +1,222 @@
+From b49fb46357ffb3d561e219ab03beef29a81c5d71 Mon Sep 17 00:00:00 2001
+From: Thien An Dang Thanh <24854119+thienandangthanh@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 06:39:12 +0900
+Subject: [PATCH] Read the en-gNB Global E2 Node ID from global-en-gNB-ID
+
+E2AP v03.00 names the en-gNB choice's field global-en-gNB-ID (GlobalenGNB-ID) and e2term 6.0.6 renders that name, so the v01 name global-gNB-ID left the PLMN identity and gNB ID empty and e2mgr refused every en-gNB E2 Setup. The en-gNB fixture uses the v03.00 name; a v01-named fixture yields no identity. The tests live in their own package and run in the image build.
+---
+ E2Manager/build-e2mgr-ubuntu.sh               |   4 +
+ E2Manager/models/e2_setup_request_message.go  |   2 +-
+ .../engnbglobalid/en_gnb_global_id_test.go    |  39 +++++++
+ .../setupRequest/setupRequest_en-gNB.xml      |   4 +-
+ .../setupRequest_en-gNB_v01_global-gNB-ID.xml | 105 ++++++++++++++++++
+ 5 files changed, 151 insertions(+), 3 deletions(-)
+ create mode 100644 E2Manager/models/engnbglobalid/en_gnb_global_id_test.go
+ create mode 100644 E2Manager/tests/resources/setupRequest/setupRequest_en-gNB_v01_global-gNB-ID.xml
+
+diff --git a/E2Manager/build-e2mgr-ubuntu.sh b/E2Manager/build-e2mgr-ubuntu.sh
+index 194b026..a8b5a70 100755
+--- a/E2Manager/build-e2mgr-ubuntu.sh
++++ b/E2Manager/build-e2mgr-ubuntu.sh
+@@ -57,6 +57,10 @@ cd 3rdparty/asn1codec \
+ 
+ go build -v app/main.go
+ 
++# The en-gNB Global E2 Node ID tests (E2AP v03.00 field name global-en-gNB-ID), in their own package: the
++# go-acc run below builds no test binary at this release (its mocks and go vet fail), so it cannot fail the build.
++go test -vet=off -count=1 -v ./models/engnbglobalid/
++
+ # Execute UT and measure coverage
+ # cgocheck=2 enables expensive checks that should not miss any errors,
+ # but will cause your program to run slower.
+diff --git a/E2Manager/models/e2_setup_request_message.go b/E2Manager/models/e2_setup_request_message.go
+index 949a59b..33b9e77 100644
+--- a/E2Manager/models/e2_setup_request_message.go
++++ b/E2Manager/models/e2_setup_request_message.go
+@@ -51,7 +51,7 @@ type EnGnb struct {
+ 			Text  string `xml:",chardata"`
+ 			GnbID string `xml:"gNB-ID"`
+ 		} `xml:"gNB-ID"`
+-	} `xml:"global-gNB-ID"`
++	} `xml:"global-en-gNB-ID"`
+ }
+ 
+ type NgEnbId struct {
+diff --git a/E2Manager/models/engnbglobalid/en_gnb_global_id_test.go b/E2Manager/models/engnbglobalid/en_gnb_global_id_test.go
+new file mode 100644
+index 0000000..597671c
+--- /dev/null
++++ b/E2Manager/models/engnbglobalid/en_gnb_global_id_test.go
+@@ -0,0 +1,39 @@
++// The en-gNB choice of the Global E2 Node ID: E2AP v03.00 names its field global-en-gNB-ID (GlobalenGNB-ID), and
++// e2term 6.0.6 renders that name in the XER it forwards. These tests read the setup request fixtures through
++// E2SetupRequestMessage alone, in their own package, so they build without the e2mgr/tests helpers.
++package engnbglobalid_test
++
++import (
++	"e2mgr/models"
++	"e2mgr/utils"
++	"encoding/xml"
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++)
++
++const (
++	enGnbSetupRequestXmlPath         = "../../tests/resources/setupRequest/setupRequest_en-gNB.xml"
++	enGnbV01FieldSetupRequestXmlPath = "../../tests/resources/setupRequest/setupRequest_en-gNB_v01_global-gNB-ID.xml"
++)
++
++func setupRequestFrom(t *testing.T, path string) *models.E2SetupRequestMessage {
++	req := &models.E2SetupRequestMessage{}
++	assert.Nil(t, xml.Unmarshal(utils.NormalizeXml(utils.ReadXmlFile(t, path)), &req.E2APPDU))
++	return req
++}
++
++func TestEnGnbGlobalEnGnbIdGivesPlmnIdAndNbId(t *testing.T) {
++	req := setupRequestFrom(t, enGnbSetupRequestXmlPath)
++
++	assert.Equal(t, "131014", req.GetPlmnId())
++	assert.Equal(t, "11000101110001101100011111111000", req.GetNbId())
++}
++
++// The E2AP v01 name global-gNB-ID inside <en-gNB> is not read: such a request yields no PLMN identity and no nbId.
++func TestEnGnbV01FieldNameGivesEmptyPlmnIdAndNbId(t *testing.T) {
++	req := setupRequestFrom(t, enGnbV01FieldSetupRequestXmlPath)
++
++	assert.Equal(t, "", req.GetPlmnId())
++	assert.Equal(t, "", req.GetNbId())
++}
+diff --git a/E2Manager/tests/resources/setupRequest/setupRequest_en-gNB.xml b/E2Manager/tests/resources/setupRequest/setupRequest_en-gNB.xml
+index 68986af..d3df8be 100644
+--- a/E2Manager/tests/resources/setupRequest/setupRequest_en-gNB.xml
++++ b/E2Manager/tests/resources/setupRequest/setupRequest_en-gNB.xml
+@@ -24,12 +24,12 @@
+                         <value>
+                             <GlobalE2node-ID>
+                                 <en-gNB>
+-                                    <global-gNB-ID>
++                                    <global-en-gNB-ID>
+                                         <pLMN-Identity>13 10 14</pLMN-Identity>
+                                         <gNB-ID>
+                                             <gNB-ID>11000101110001101100011111111000</gNB-ID>
+                                         </gNB-ID>
+-                                    </global-gNB-ID>
++                                    </global-en-gNB-ID>
+                                 </en-gNB>
+                             </GlobalE2node-ID>
+                         </value>
+diff --git a/E2Manager/tests/resources/setupRequest/setupRequest_en-gNB_v01_global-gNB-ID.xml b/E2Manager/tests/resources/setupRequest/setupRequest_en-gNB_v01_global-gNB-ID.xml
+new file mode 100644
+index 0000000..68986af
+--- /dev/null
++++ b/E2Manager/tests/resources/setupRequest/setupRequest_en-gNB_v01_global-gNB-ID.xml
+@@ -0,0 +1,105 @@
++<E2AP-PDU>
++    <initiatingMessage>
++        <procedureCode>1</procedureCode>
++        <criticality>
++            <reject/>
++        </criticality>
++        <value>
++            <E2setupRequest>
++                <protocolIEs>
++                    <E2setupRequestIEs>
++                        <id>49</id>
++                        <criticality>
++                            <reject/>
++                        </criticality>
++                        <value>
++                            <TransactionID>1</TransactionID>
++                        </value>
++                    </E2setupRequestIEs>
++                    <E2setupRequestIEs>
++                        <id>3</id>
++                        <criticality>
++                            <reject/>
++                        </criticality>
++                        <value>
++                            <GlobalE2node-ID>
++                                <en-gNB>
++                                    <global-gNB-ID>
++                                        <pLMN-Identity>13 10 14</pLMN-Identity>
++                                        <gNB-ID>
++                                            <gNB-ID>11000101110001101100011111111000</gNB-ID>
++                                        </gNB-ID>
++                                    </global-gNB-ID>
++                                </en-gNB>
++                            </GlobalE2node-ID>
++                        </value>
++                    </E2setupRequestIEs>
++                    <E2setupRequestIEs>
++                        <id>10</id>
++                        <criticality>
++                            <reject/>
++                        </criticality>
++                        <value>
++                            <RANfunctions-List>
++                                <ProtocolIE-SingleContainer>
++                                    <id>8</id>
++                                    <criticality>
++                                        <reject/>
++                                    </criticality>
++                                    <value>
++                                        <RANfunction-Item>
++                                            <ranFunctionID>1</ranFunctionID>
++                                            <ranFunctionDefinition>334455</ranFunctionDefinition>
++                                            <ranFunctionRevision>0</ranFunctionRevision>
++                                            <ranFunctionOID>OID123</ranFunctionOID>
++                                        </RANfunction-Item>
++                                    </value>
++                                </ProtocolIE-SingleContainer>
++                                <ProtocolIE-SingleContainer>
++                                    <id>8</id>
++                                    <criticality>
++                                        <reject/>
++                                    </criticality>
++                                    <value>
++                                        <RANfunction-Item>
++                                            <ranFunctionID>7</ranFunctionID>
++                                            <ranFunctionDefinition>334455</ranFunctionDefinition>
++                                            <ranFunctionRevision>0</ranFunctionRevision>
++                                            <ranFunctionOID>OID123</ranFunctionOID>
++                                        </RANfunction-Item>
++                                    </value>
++                                </ProtocolIE-SingleContainer>
++                            </RANfunctions-List>
++                        </value>
++                    </E2setupRequestIEs>
++                    <E2setupRequestIEs>
++                        <id>50</id>
++                        <criticality><reject/></criticality>
++                        <value>
++                            <E2nodeComponentConfigAddition-List>
++                                <ProtocolIE-SingleContainer>
++                                    <id>51</id>
++                                    <criticality><reject/></criticality>
++                                    <value>
++                                        <E2nodeComponentConfigAddition-Item>
++                                            <e2nodeComponentInterfaceType><ng/></e2nodeComponentInterfaceType>
++                                            <e2nodeComponentID>
++                                                <e2nodeComponentInterfaceTypeNG>
++                                                    <amf-name>nginterf</amf-name>
++                                                </e2nodeComponentInterfaceTypeNG>
++                                            </e2nodeComponentID>
++                                            <e2nodeComponentConfiguration>
++                                                <e2nodeComponentRequestPart>72 65 71 70 61 72 74</e2nodeComponentRequestPart>
++                                                <e2nodeComponentResponsePart>72 65 73 70 61 72 74</e2nodeComponentResponsePart>
++                                            </e2nodeComponentConfiguration>
++                                        </E2nodeComponentConfigAddition-Item>
++                                    </value>
++                                </ProtocolIE-SingleContainer>
++                            </E2nodeComponentConfigAddition-List>
++                        </value>
++                    </E2setupRequestIEs>
++                </protocolIEs>
++            </E2setupRequest>
++        </value>
++    </initiatingMessage>
++</E2AP-PDU>
+-- 
+2.56.0
+
