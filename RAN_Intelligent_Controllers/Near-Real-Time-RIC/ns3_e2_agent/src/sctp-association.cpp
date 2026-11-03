@@ -35,6 +35,20 @@ void set_liveness_options(int fd) {
     ALOG_W("SCTP_ASSOCINFO: %s", strerror(errno));
 }
 
+// E2AP's SCTP Payload Protocol Identifier, assigned by IANA (O-RAN E2GAP
+// v08.00 §6.1: "is 70 ... to be used for all deployment configurations").
+constexpr uint32_t kE2apPpid = 70;
+
+// Makes every message on this association carry PPID 70 by default.
+bool set_default_ppid(int fd, std::string &err) {
+  struct sctp_sndinfo si;
+  memset(&si, 0, sizeof si);
+  si.snd_ppid = htonl(kE2apPpid);
+  if (setsockopt(fd, IPPROTO_SCTP, SCTP_DEFAULT_SNDINFO, &si, sizeof si) == 0) return true;
+  err = std::string("SCTP_DEFAULT_SNDINFO: ") + strerror(errno);
+  return false;
+}
+
 }  // namespace
 
 bool SctpAssociation::start_connect(const std::string &addr, int port, int srcPort, std::string &err) {
@@ -96,6 +110,12 @@ bool SctpAssociation::finish_connect(std::string &err) {
   }
   connecting_ = false;
   set_liveness_options(fd_);  // again, now that the association exists
+  // PPID 70 on every message: the socket default if the kernel takes it, else
+  // an SCTP_SNDINFO control message per send. A send that cannot carry PPID 70
+  // fails (Lost); nothing is ever sent with PPID 0.
+  std::string why;
+  ppidPerMessage_ = !set_default_ppid(fd_, why);
+  if (ppidPerMessage_) ALOG_W("%s; PPID %u set per message", why.c_str(), (unsigned)kE2apPpid);
   return true;
 }
 
@@ -144,7 +164,27 @@ bool SctpAssociation::read_messages(std::vector<Bytes> &out, std::string &reason
 
 SctpAssociation::SendResult SctpAssociation::send(const Bytes &msg, std::string &err) {
   for (;;) {
-    ssize_t n = ::send(fd_, msg.data(), msg.size(), MSG_NOSIGNAL | MSG_DONTWAIT);
+    ssize_t n;
+    if (!ppidPerMessage_) {
+      n = ::send(fd_, msg.data(), msg.size(), MSG_NOSIGNAL | MSG_DONTWAIT);
+    } else {
+      struct iovec iov = {const_cast<uint8_t *>(msg.data()), msg.size()};
+      alignas(struct cmsghdr) char cbuf[CMSG_SPACE(sizeof(struct sctp_sndinfo))];
+      memset(cbuf, 0, sizeof cbuf);
+      struct msghdr mh;
+      memset(&mh, 0, sizeof mh);
+      mh.msg_iov = &iov;
+      mh.msg_iovlen = 1;
+      mh.msg_control = cbuf;
+      mh.msg_controllen = sizeof cbuf;
+      struct cmsghdr *c = CMSG_FIRSTHDR(&mh);
+      c->cmsg_level = IPPROTO_SCTP;
+      c->cmsg_type = SCTP_SNDINFO;
+      c->cmsg_len = CMSG_LEN(sizeof(struct sctp_sndinfo));
+      auto *si = (struct sctp_sndinfo *)CMSG_DATA(c);
+      si->snd_ppid = htonl(kE2apPpid);
+      n = ::sendmsg(fd_, &mh, MSG_NOSIGNAL | MSG_DONTWAIT);
+    }
     if (n == (ssize_t)msg.size()) return SendResult::Sent;
     if (n >= 0) {
       err = "short SCTP send";

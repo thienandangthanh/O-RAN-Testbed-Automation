@@ -24,7 +24,7 @@ class SctpAssociation {
   bool finish_connect(std::string &err);
   // Reads every complete message available. False = association lost (reason set).
   bool read_messages(std::vector<Bytes> &out, std::string &reason);
-  // One E2AP message, MSG_NOSIGNAL | MSG_DONTWAIT (stream 0, PPID 0 as NIST's e2sim).
+  // One E2AP message, MSG_NOSIGNAL | MSG_DONTWAIT, stream 0, PPID 70 (E2GAP §6.1).
   SendResult send(const Bytes &msg, std::string &err);
   void close();
   // SHUTDOWN the association and wait up to timeoutMs for it to end, so e2term
@@ -40,6 +40,7 @@ class SctpAssociation {
   int fd_ = -1;
   bool connecting_ = false;
   Bytes partial_;  // message without MSG_EOR yet
+  bool ppidPerMessage_ = false;  // SCTP_DEFAULT_SNDINFO refused: PPID via cmsg
 };
 
 }  // namespace agent

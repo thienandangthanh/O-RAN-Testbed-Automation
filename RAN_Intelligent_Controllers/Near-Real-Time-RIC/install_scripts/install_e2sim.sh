@@ -55,6 +55,13 @@ cp install_patch_files/e2-interface/e2sim/src/messagerouting/e2ap_message_handle
 cp install_patch_files/e2-interface/e2sim/e2sm_examples/kpm_e2sm/reports.json e2-interface/e2sim/e2sm_examples/kpm_e2sm/
 cp install_patch_files/e2-interface/e2sim/e2sm_examples/kpm_e2sm/src/kpm/encode_kpm.cpp e2-interface/e2sim/e2sm_examples/kpm_e2sm/src/kpm/
 cp install_patch_files/e2-interface/e2sim/e2sm_examples/kpm_e2sm/src/kpm/kpm_callbacks.cpp e2-interface/e2sim/e2sm_examples/kpm_e2sm/src/kpm/
+# Send every E2AP message with SCTP PPID 70 (O-RAN E2GAP v08.00 section 6.1);
+# the guard stops a build from a tree that lacks the patched file.
+cp install_patch_files/e2-interface/e2sim/src/SCTP/e2sim_sctp.cpp e2-interface/e2sim/src/SCTP/
+if [ "$(sha256sum < install_patch_files/e2-interface/e2sim/src/SCTP/e2sim_sctp.cpp)" != "$(sha256sum < e2-interface/e2sim/src/SCTP/e2sim_sctp.cpp)" ]; then
+    echo "ERROR: e2-interface/e2sim/src/SCTP/e2sim_sctp.cpp is not the PPID 70 patch file."
+    exit 1
+fi
 
 cd e2-interface/e2sim/
 
