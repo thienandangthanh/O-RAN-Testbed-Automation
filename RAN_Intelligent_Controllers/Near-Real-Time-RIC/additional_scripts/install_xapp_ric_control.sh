@@ -32,6 +32,11 @@ echo "# Script: $(realpath "$0") $@"
 
 # Run this script to build and deploy the RIC Control xApp (rc) in the Near-Real-Time RIC.
 # More information can be found at: https://github.com/o-ran-sc/ric-app-rc and https://docs.o-ran-sc.org/projects/o-ran-sc-ric-app-rc/en/latest/overview.html
+#
+# Modified (2026-11): rc is reset to the commit pinned in commit_hashes.json and the patch set listed in
+# install_patch_files/xApps/rc/patches.manifest is applied in order (the RANParameter-ID bound and the APER NR CGI
+# target). The image is labelled rc.source.sha (the pinned commit) and patchset.sha256 (sha256 of patches.manifest
+# followed by each listed patch, in manifest order), and is rebuilt whenever that label differs.
 
 # Exit immediately if a command fails
 set -e
@@ -76,6 +81,27 @@ if ! command -v jq &>/dev/null; then
     sudo env $APTVARS apt-get install -y jq
 fi
 
+RC_URL="https://gerrit.o-ran-sc.org/r/ric-app/rc.git"
+RC_PATCH_DIR="$PARENT_DIR/install_patch_files/xApps/rc"
+RC_SOURCE_SHA=$(jq -r --arg u "$RC_URL" '.[$u][1] // empty' "$PARENT_DIR/commit_hashes.json")
+if [[ ! "$RC_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "ERROR: commit_hashes.json has no 40-hex commit for $RC_URL"
+    exit 1
+fi
+mapfile -t RC_PATCHES < <(grep -vE '^\s*(#|$)' "$RC_PATCH_DIR/patches.manifest")
+if [ "${#RC_PATCHES[@]}" -eq 0 ]; then
+    echo "ERROR: $RC_PATCH_DIR/patches.manifest lists no patch"
+    exit 1
+fi
+RC_PATCHSET_SHA256=$( (cat "$RC_PATCH_DIR/patches.manifest" && for p in "${RC_PATCHES[@]}"; do cat "$RC_PATCH_DIR/$p"; done) | sha256sum | cut -d' ' -f1)
+git fetch -q origin "$RC_SOURCE_SHA" 2>/dev/null || true
+git checkout -q --detach "$RC_SOURCE_SHA"
+git reset -q --hard "$RC_SOURCE_SHA"
+for p in "${RC_PATCHES[@]}"; do
+    echo "Applying $p..."
+    git apply --whitespace=nowarn "$RC_PATCH_DIR/$p"
+done
+
 FILE="xapp-descriptor/config_updated.json"
 sudo rm -rf "$FILE"
 cp xapp-descriptor/config.json "$FILE"
@@ -108,8 +134,10 @@ if [ -z "$FIXED_DOCKER_PERMS" ]; then
     fi
 fi
 
-if [ ! -f rc.tar ]; then
-    docker build --network host -t 127.0.0.1:80/rc:latest .
+RC_IMAGE_LABEL=$(docker image inspect --format '{{index .Config.Labels "patchset.sha256"}}' 127.0.0.1:80/rc:latest 2>/dev/null || true)
+if [ ! -f rc.tar ] || [ "$RC_IMAGE_LABEL" != "$RC_PATCHSET_SHA256" ]; then
+    docker build --network host --label "rc.source.sha=$RC_SOURCE_SHA" --label "patchset.sha256=$RC_PATCHSET_SHA256" \
+        -t 127.0.0.1:80/rc:latest .
     docker save -o rc.tar 127.0.0.1:80/rc:latest
     sudo chmod 755 rc.tar
     sudo chown "${SUDO_USER:-$USER}" rc.tar
@@ -117,7 +145,7 @@ if [ ! -f rc.tar ]; then
     # Import the image into the containerd container runtime
     sudo ctr -n=k8s.io image import rc.tar
 else
-    echo "RIC Control xApp (rc) is already built, skipping."
+    echo "RIC Control xApp (rc) is already built with patch set $RC_PATCHSET_SHA256, skipping."
 fi
 
 echo "Onboarding the RIC Control xApp (rc)..."

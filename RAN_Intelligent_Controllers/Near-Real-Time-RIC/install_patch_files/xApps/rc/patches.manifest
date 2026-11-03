@@ -1,0 +1,5 @@
+# RIC Control xApp (rc) patch set, applied in this order with git apply to the commit pinned in commit_hashes.json
+# (additional_scripts/install_xapp_ric_control.sh). The ns3-e2-agent image applies the same set to the rc e2sm code
+# it builds librc_codec from. The rc image's patchset.sha256 label derives from this file and the files it lists.
+0001-bound-ran-parameter-id.patch
+0002-send-the-target-cell-as-an-aper-nr-cgi.patch

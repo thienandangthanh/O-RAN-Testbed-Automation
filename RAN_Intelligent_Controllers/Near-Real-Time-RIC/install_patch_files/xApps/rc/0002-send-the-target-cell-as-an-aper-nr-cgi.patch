@@ -1,0 +1,151 @@
+From 6d298f85efeb1081388b1ceb258a514ca62483ea Mon Sep 17 00:00:00 2001
+From: Thien An Dang Thanh <24854119+thienandangthanh@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 08:16:09 +0900
+Subject: [PATCH 2/2] Send the target cell as an APER NR CGI
+
+RAN parameter 4 (NR CGI, E2SM-RC 8.4.4.1) carried the hex of "00", the
+UE's GUAMI PLMN and the gRPC TargetCellID string, which is not an NR-CGI. The
+gRPC service now admits only a TargetCellID of the TS xApp's cell key form (9
+hex digits of NR Cell Identity followed by 0) and a 6-hex plmnID, and refuses
+anything else with InvalidArgument without sending a control. The message
+carries the APER NR-CGI of the E2 node's PLMN Identity and that NR Cell
+Identity, and the wrapper frees the NR-CGI it encodes.
+---
+ control/rcControl.go | 17 +++++++++++++----
+ control/rcE2SmRc.go  | 27 +++++++++++++++------------
+ control/rcService.go | 16 ++++++++++++++++
+ e2sm/wrapper.c       |  1 +
+ 4 files changed, 45 insertions(+), 16 deletions(-)
+
+diff --git a/control/rcControl.go b/control/rcControl.go
+index 34fd310..8ce1bc5 100644
+--- a/control/rcControl.go
++++ b/control/rcControl.go
+@@ -8,7 +8,7 @@ import (
+ 	"strconv"
+ 	"sync"
+ 	"time"
+-	//"encoding/hex"
++	"encoding/hex"
+ 	"gerrit.o-ran-sc.org/r/ric-app/rc/protocol/grpc/ricmsgcommrpc/rc"
+ 	"gerrit.o-ran-sc.org/r/ric-plt/xapp-frame/pkg/xapp"
+ )
+@@ -242,14 +242,23 @@ func (aRicHoControlMsg *RicHoControlMsg) SendRicControlRequest(aRequestSN int) (
+ 
+ 	lNrOrEUtraCellType := aRicHoControlMsg.RicControlGrpcReqPtr.RICControlMessageData.RICControlCellTypeVal
+ 	lTargetCellVal := aRicHoControlMsg.RicControlGrpcReqPtr.RICControlMessageData.TargetCellID
+-	//lTargetCellValBuf, _:= hex.DecodeString(lTargetCellVal)
+-	lTargetCellValBuf := []byte(lTargetCellVal)
++	// the gRPC service admitted only a 10-hex cell key and a 6-hex PLMN Identity
++	lNRCellId, err := strconv.ParseUint(lTargetCellVal[:9], 16, 64)
++	if err != nil {
++		xapp.Logger.Error("TargetCellID %q: %v", lTargetCellVal, err)
++		return err
++	}
++	lPlmnId, err := hex.DecodeString(aRicHoControlMsg.RicControlGrpcReqPtr.PlmnID)
++	if err != nil {
++		xapp.Logger.Error("plmnID %q: %v", aRicHoControlMsg.RicControlGrpcReqPtr.PlmnID, err)
++		return err
++	}
+ 	//lNRPlmnId := []byte(aRicHoControlMsg.RicControlGrpcReqPtr.RICControlMessageData.TargetCellID.PlmnID)
+         //lNRCellId := aRicHoControlMsg.RicControlGrpcReqPtr.RICControlMessageData.TargetCellID.NRCellID
+ 
+ 
+ 	var lRicControlMessage []byte = make([]byte, 1024)
+-	lRicControlMessageEncoded, err := e2sm.SetRicControlMessage(lRicControlMessage, lTargetPrimaryCell, lTargetCell, lNrCGIOrECGI, int64(lNrOrEUtraCellType), ueId_data.pLMNIdentitybuf, lTargetCellValBuf)
++	lRicControlMessageEncoded, err := e2sm.SetRicControlMessage(lRicControlMessage, lTargetPrimaryCell, lTargetCell, lNrCGIOrECGI, int64(lNrOrEUtraCellType), lPlmnId, lNRCellId)
+ 	if err != nil {
+ 		xapp.Logger.Error("SetRicControlMessage Failed: %v, UEID:%v", err, aRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID)
+ 		log.Printf("SetRicControlMessage Failed: %v, UEID:%v", err, aRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID)
+diff --git a/control/rcE2SmRc.go b/control/rcE2SmRc.go
+index 2f9a9d4..71561bd 100644
+--- a/control/rcE2SmRc.go
++++ b/control/rcE2SmRc.go
+@@ -89,19 +89,22 @@ func (c *E2sm) SetRicControlHeader(buffer []byte, ueIdData *UEid, ricControlStyl
+ 	return
+ }
+ 
+-func (c *E2sm) SetRicControlMessage(buffer []byte, targetPrimaryCell int64, targetCell int64, nrCGIOrECGI int64, nrOrEUtraCell int64, pLMNIdentitybuf string,NRcellIdbuf []byte) (newBuffer []byte, err error) {
+-	
++// SetRicControlMessage encodes Control Message Format 1 whose RAN parameter 4 (NR CGI, E2SM-RC 8.4.4.1) is the APER
++// NR-CGI (E2SM common) of plmnId (3 octets) and nrCellId (the 36-bit NR Cell Identity).
++func (c *E2sm) SetRicControlMessage(buffer []byte, targetPrimaryCell int64, targetCell int64, nrCGIOrECGI int64, nrOrEUtraCell int64, plmnId []byte, nrCellId uint64) (newBuffer []byte, err error) {
++
+ 	xapp.Logger.Info("SetRicControlMessagei Enter  ")
+-	//lOutByte, err := hex.DecodeString(string(ranParameterValue))
+-	 lplmnIdBuf := strings.Join(strings.Fields(pLMNIdentitybuf), "")
+-        //lOutByte, err := hex.DecodeString(lplmnIdBuf)
+-        //if err != nil {
+-          //      return 
+-        //}
+-	NRCGI:="00"+lplmnIdBuf+string(NRcellIdbuf)
+-	lOutByte, _ := hex.DecodeString(NRCGI)
+-	//tmp_plmn:=[]byte(lplmnIdBuf)
+-        cptrRanParameterValue := unsafe.Pointer(&lOutByte[0])
++	if len(plmnId) != 3 || nrCellId >= 1<<36 {
++		return make([]byte, 0), errors.New("NR CGI needs a 3-octet PLMN Identity and a 36-bit NR Cell Identity")
++	}
++	lOutByte := make([]byte, 16)
++	nrcgiBits := C.e2sm_encode_nrcgi(nil, unsafe.Pointer(&plmnId[0]), C.size_t(len(plmnId)), C.ulong(nrCellId),
++		(*C.uint8_t)(unsafe.Pointer(&lOutByte[0])), C.size_t(len(lOutByte)))
++	if nrcgiBits <= 0 {
++		return make([]byte, 0), errors.New("e2sm wrapper is unable to encode the NR CGI")
++	}
++	lOutByte = lOutByte[:(nrcgiBits+7)/8]
++	cptrRanParameterValue := unsafe.Pointer(&lOutByte[0])
+ 
+ 
+ 	cptr := unsafe.Pointer(&buffer[0])
+diff --git a/control/rcService.go b/control/rcService.go
+index 0523562..9a843f1 100644
+--- a/control/rcService.go
++++ b/control/rcService.go
+@@ -2,6 +2,7 @@ package control
+ 
+ import (
+ 	"log"
++	"regexp"
+ 	"runtime/debug"
+ 	_ "strings"
+ 	"time"
+@@ -9,6 +10,15 @@ import (
+ 	"gerrit.o-ran-sc.org/r/ric-app/rc/protocol/grpc/ricmsgcommrpc/rc"
+ 	"gerrit.o-ran-sc.org/r/ric-plt/xapp-frame/pkg/xapp"
+ 	"golang.org/x/net/context"
++	"google.golang.org/grpc/codes"
++	"google.golang.org/grpc/status"
++)
++
++// TargetCellID is the TS xApp's cell key: the 36-bit NR Cell Identity in 9 hex digits followed by its 4 unused
++// bits as hex 0. plmnID is the E2 node's PLMN Identity, 3 octets in hex (3GPP TS 38.413 9.3.3.5).
++var (
++	targetCellKeyRe = regexp.MustCompile(`^[0-9A-F]{9}0$`)
++	plmnIDRe        = regexp.MustCompile(`^[0-9A-Fa-f]{6}$`)
+ )
+ 
+ func (aPtrSendMsgSrv *RCControlServer) SendRICControlReqServiceGrpc(aCtx context.Context, aPtrRicControlGrpcReq *rc.RicControlGrpcReq) (*rc.RicControlGrpcRsp, error) {
+@@ -34,6 +44,12 @@ func (aPtrSendMsgSrv *RCControlServer) SendRICControlReqServiceGrpc(aCtx context
+ 		//if len(aPtrRicControlGrpcReq.E2NodeID) == 0 || len(aPtrRicControlGrpcReq.RICControlMessageData.TargetCellID) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.PLMNIdentity) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.AMFRegionID) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.AMFSetID) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.AMFPointer) == 0 || len(aPtrRicControlGrpcReq.RanName) == 0 || len(aPtrRicControlGrpcReq.PlmnID) == 0 {
+ 		if len(aPtrRicControlGrpcReq.E2NodeID) == 0 || len(aPtrRicControlGrpcReq.RICControlMessageData.TargetCellID) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.PLMNIdentity) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.AMFRegionID) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.AMFSetID) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.AMFPointer) == 0 || len(aPtrRicControlGrpcReq.RanName) == 0 || len(aPtrRicControlGrpcReq.PlmnID) == 0 {
+ 			xapp.Logger.Error("Mandatory parameters are not received send Error rsp to client,no control Request will be initiated ")
++		} else if !targetCellKeyRe.MatchString(aPtrRicControlGrpcReq.RICControlMessageData.TargetCellID) ||
++			!plmnIDRe.MatchString(aPtrRicControlGrpcReq.PlmnID) {
++			xapp.Logger.Error("TargetCellID %q or plmnID %q is not an NR cell key / PLMN Identity, no control Request will be initiated",
++				aPtrRicControlGrpcReq.RICControlMessageData.TargetCellID, aPtrRicControlGrpcReq.PlmnID)
++			return nil, status.Errorf(codes.InvalidArgument,
++				"TargetCellID must be 9 hex digits of NR Cell Identity followed by 0, plmnID 6 hex digits")
+ 		} else {
+ 			xapp.Logger.Info("GRPC Control request validated, initiate Control Request to RAN")
+ 			gChan_RicControlReq_handle <- aPtrRicControlGrpcReq
+diff --git a/e2sm/wrapper.c b/e2sm/wrapper.c
+index b28e1b1..94eb197 100755
+--- a/e2sm/wrapper.c
++++ b/e2sm/wrapper.c
+@@ -202,6 +202,7 @@ ssize_t e2sm_encode_nrcgi(NR_CGI_t *nr_cgi, void* plmnIdValue, size_t  plmnId_si
+           xer_fprint(stderr, &asn_DEF_NR_CGI, nr_cgi);
+ 
+ 	   asn_enc_rval_t encode_result = aper_encode_to_buffer(&asn_DEF_NR_CGI, NULL, nr_cgi, buffer, buf_size);
++	   ASN_STRUCT_FREE(asn_DEF_NR_CGI, nr_cgi);
+ 
+            if(encode_result.encoded != -1)
+            {

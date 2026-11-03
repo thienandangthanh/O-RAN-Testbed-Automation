@@ -1,0 +1,108 @@
+From cdb012d37b8fff856b1ac003e1f58e48e47def96 Mon Sep 17 00:00:00 2001
+From: Thien An Dang Thanh <24854119+thienandangthanh@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 08:16:09 +0900
+Subject: [PATCH 1/2] Bound RANParameter-ID to 1..4294967295 with an extension
+ marker
+
+E2SM-RC defines RANParameter-ID as INTEGER (1..2^32, ...). 2^32 is not ASN.1
+value notation, so asn1c dropped the whole constraint and encoded the ID as an
+unconstrained integer (a length octet and the value), which no X.691 decoder
+reads as the specified type. The bound is now written as 4294967295 and the
+type regenerated: APER puts the extension bit, a 2-bit octet count and the
+value minus 1 on the wire, and the C type is unsigned long.
+---
+ e2sm/e2sm-rc-2.0.asn           |  2 +-
+ e2sm/headers/RANParameter-ID.h |  3 ++-
+ e2sm/lib/RANParameter-ID.c     | 23 +++++++++++++++++------
+ 3 files changed, 20 insertions(+), 8 deletions(-)
+
+diff --git a/e2sm/e2sm-rc-2.0.asn b/e2sm/e2sm-rc-2.0.asn
+index 6a55877..644d815 100644
+--- a/e2sm/e2sm-rc-2.0.asn
++++ b/e2sm/e2sm-rc-2.0.asn
+@@ -197,7 +197,7 @@ EventTrigger-UEevent-Info-Item ::= SEQUENCE {
+ -- RAN Parameter related IEs
+ -------------------------------
+ 
+-RANParameter-ID 	::= INTEGER (1..2^32, ...)
++RANParameter-ID 	::= INTEGER (1..4294967295, ...)
+ 
+ RANParameter-Name ::= PrintableString (SIZE(1..150, ...))
+ 
+diff --git a/e2sm/headers/RANParameter-ID.h b/e2sm/headers/RANParameter-ID.h
+index dce8b1d..c793770 100644
+--- a/e2sm/headers/RANParameter-ID.h
++++ b/e2sm/headers/RANParameter-ID.h
+@@ -19,11 +19,12 @@ extern "C" {
+ #endif
+ 
+ /* RANParameter-ID */
+-typedef long	 RANParameter_ID_t;
++typedef unsigned long	 RANParameter_ID_t;
+ 
+ /* Implementation */
+ extern asn_per_constraints_t asn_PER_type_RANParameter_ID_constr_1;
+ extern asn_TYPE_descriptor_t asn_DEF_RANParameter_ID;
++extern const asn_INTEGER_specifics_t asn_SPC_RANParameter_ID_specs_1;
+ asn_struct_free_f RANParameter_ID_free;
+ asn_struct_print_f RANParameter_ID_print;
+ asn_constr_check_f RANParameter_ID_constraint;
+diff --git a/e2sm/lib/RANParameter-ID.c b/e2sm/lib/RANParameter-ID.c
+index dcda103..f4bbcb4 100644
+--- a/e2sm/lib/RANParameter-ID.c
++++ b/e2sm/lib/RANParameter-ID.c
+@@ -10,6 +10,7 @@
+ int
+ RANParameter_ID_constraint(const asn_TYPE_descriptor_t *td, const void *sptr,
+ 			asn_app_constraint_failed_f *ctfailcb, void *app_key) {
++	unsigned long value;
+ 	
+ 	if(!sptr) {
+ 		ASN__CTFAIL(app_key, td, sptr,
+@@ -18,12 +19,17 @@ RANParameter_ID_constraint(const asn_TYPE_descriptor_t *td, const void *sptr,
+ 		return -1;
+ 	}
+ 	
++	value = *(const unsigned long *)sptr;
+ 	
+-	if(1 /* No applicable constraints whatsoever */) {
+-		/* Nothing is here. See below */
++	if((value >= 1UL && value <= 4294967295UL)) {
++		/* Constraint check succeeded */
++		return 0;
++	} else {
++		ASN__CTFAIL(app_key, td, sptr,
++			"%s: constraint failed (%s:%d)",
++			td->name, __FILE__, __LINE__);
++		return -1;
+ 	}
+-	
+-	return td->encoding_constraints.general_constraints(td, sptr, ctfailcb, app_key);
+ }
+ 
+ /*
+@@ -34,10 +40,15 @@ static asn_oer_constraints_t asn_OER_type_RANParameter_ID_constr_1 CC_NOTUSED =
+ 	{ 0, 0 },
+ 	-1};
+ asn_per_constraints_t asn_PER_type_RANParameter_ID_constr_1 CC_NOTUSED = {
+-	{ APC_UNCONSTRAINED,	-1, -1,  0,  0 },
++	{ APC_CONSTRAINED | APC_EXTENSIBLE,  32, -1,  1,  4294967295 }	/* (1..4294967295,...) */,
+ 	{ APC_UNCONSTRAINED,	-1, -1,  0,  0 },
+ 	0, 0	/* No PER value map */
+ };
++const asn_INTEGER_specifics_t asn_SPC_RANParameter_ID_specs_1 = {
++	0,	0,	0,	0,	0,
++	0,	/* Native long size */
++	1	/* Unsigned representation */
++};
+ static const ber_tlv_tag_t asn_DEF_RANParameter_ID_tags_1[] = {
+ 	(ASN_TAG_CLASS_UNIVERSAL | (2 << 2))
+ };
+@@ -53,6 +64,6 @@ asn_TYPE_descriptor_t asn_DEF_RANParameter_ID = {
+ 		/sizeof(asn_DEF_RANParameter_ID_tags_1[0]), /* 1 */
+ 	{ &asn_OER_type_RANParameter_ID_constr_1, &asn_PER_type_RANParameter_ID_constr_1, RANParameter_ID_constraint },
+ 	0, 0,	/* No members */
+-	0	/* No specifics */
++	&asn_SPC_RANParameter_ID_specs_1	/* Additional specs */
+ };
+ 
