@@ -62,6 +62,7 @@ if [ "$(sha256sum < install_patch_files/e2-interface/e2sim/src/SCTP/e2sim_sctp.c
     echo "ERROR: e2-interface/e2sim/src/SCTP/e2sim_sctp.cpp is not the PPID 70 patch file."
     exit 1
 fi
+E2SIM_SCTP_SHA256=$(sha256sum < install_patch_files/e2-interface/e2sim/src/SCTP/e2sim_sctp.cpp | cut -d' ' -f1)
 
 cd e2-interface/e2sim/
 
@@ -70,7 +71,9 @@ cd build/
 cmake .. && make -j$(nproc) package && cmake .. -DDEV_PKG=1 && make -j$(nproc) package
 cp *.deb ../e2sm_examples/kpm_e2sm/
 cd ../
-docker build --build-arg CONTAINER_PULL_REGISTRY=nexus3.o-ran-sc.org:10002 -t oransim:0.0.999 -f Dockerfile_kpm_updated .
+# The label ties the image to the SCTP send patch it was built with (checked by the gates).
+docker build --build-arg CONTAINER_PULL_REGISTRY=nexus3.o-ran-sc.org:10002 --label "e2sim.sctp.sha256=$E2SIM_SCTP_SHA256" \
+    -t oransim:0.0.999 -f Dockerfile_kpm_updated .
 if [ $? -ne 0 ]; then
     echo "ERROR: Docker build failed. Cleaning up the E2 simulator..."
     sudo rm -rf e2-interface
