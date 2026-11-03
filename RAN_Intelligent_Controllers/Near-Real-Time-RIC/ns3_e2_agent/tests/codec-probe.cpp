@@ -6,7 +6,7 @@
 //
 // usage: codec-probe <metric-map.json> <out-dir>
 //   <out-dir>/ind-lines.txt   "<id> <hdr_hex> <msg_hex>" per indication piece
-//   <out-dir>/ranfunc.txt     "<id> <ranfunction_description_hex>"
+//   <out-dir>/ranfunc.txt     "<id> <ranfunction_description_hex>" (id ranfunc: gNB lists; ranfunc-enb: eNB lists)
 //   <out-dir>/expect.json     expected records (REAL as IEEE-754 bits) and lists
 //   <out-dir>/e2ap-<name>.hex E2AP PDUs (see codec-probe-e2ap.cpp)
 #include <cinttypes>
@@ -23,7 +23,7 @@
 using namespace agent;
 using nlohmann::json;
 
-int probe_e2ap(const std::string &outDir, const Bytes &ranFuncDef);  // codec-probe-e2ap.cpp
+int probe_e2ap(const std::string &outDir, const Bytes &ranFuncDef, const Bytes &enbRanFuncDef);  // codec-probe-e2ap.cpp
 
 namespace {
 
@@ -68,6 +68,11 @@ int main(int argc, char **argv) {
   names.description = "ns-O-RAN KPM map v1 " + map.sha256.substr(0, 8);
   Bytes def;
   if (!encode_ran_function_description(names, map.cell, map.ue, def, err)) return fail("ranfunc", err), 1;
+  // and from the eNB lists (an eNB agent loads the rows of kind enb), for the eNB E2 Setup Request
+  MetricMap enbMap;
+  Bytes enbDef;
+  if (!load_metric_map(argv[1], "enb", enbMap, err)) return fail("metric map enb", err), 1;
+  if (!encode_ran_function_description(names, enbMap.cell, enbMap.ue, enbDef, err)) return fail("ranfunc enb", err), 1;
 
   // (b) header: 2026-10-22T00:00:00.123Z.
   Bytes hdr;
@@ -110,7 +115,7 @@ int main(int argc, char **argv) {
   lines << "f2ueid " << to_hex(hdr) << " " << to_hex(m2a) << "\n";
   lines << "f2noueid " << to_hex(hdr) << " " << to_hex(m2b) << "\n";
   lines << "f2full " << to_hex(hdr) << " " << to_hex(m2full) << "\n";
-  std::ofstream(dir + "/ranfunc.txt") << "ranfunc " << to_hex(def) << "\n";
+  std::ofstream(dir + "/ranfunc.txt") << "ranfunc " << to_hex(def) << "\n" << "ranfunc-enb " << to_hex(enbDef) << "\n";
 
   auto metric_major = [](const std::vector<std::vector<MeasValue>> &u) {
     std::vector<MeasValue> out;
@@ -132,5 +137,5 @@ int main(int argc, char **argv) {
              {"map_sha256", map.sha256}};
   std::ofstream(dir + "/expect.json") << ex.dump(1) << "\n";
   printf("%s\n", ex["sizes"].dump().c_str());
-  return probe_e2ap(dir, def);
+  return probe_e2ap(dir, def, enbDef);
 }

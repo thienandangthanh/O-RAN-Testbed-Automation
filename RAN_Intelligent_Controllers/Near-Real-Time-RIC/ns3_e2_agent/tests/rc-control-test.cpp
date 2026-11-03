@@ -1,14 +1,19 @@
-// Unit test of the RC control path (src/rc-control.cpp) and the RC codec,
-// driven by real RICcontrolRequest content: the E2SM-RC header/message octets
-// rc a2282ee sent in the pre-M8 probe (tests/fixtures/rc-control-requests.hex,
-// "<frame> <header_hex> <message_hex>"), whose target is the pre-R-3 9-octet
-// form, re-encoded with spec NR CGI targets (plan R-3; independent values from
-// pycrate). Each case prints PASS/FAIL <name>;
+// Unit test of the RC control path (src/rc-control.cpp) and the RC codec. Two
+// fixtures, lines "<id> <header_hex> <message_hex>":
+//   - tests/fixtures/rc-control-nrcgi.hex: X.691 octets from the independent
+//     codec (harness tools/rc-decode/make-nrcgi-fixture.py, pycrate), Style 3
+//     action 1, ids "s3a1-imsi<k>-gnb<n>", target = the APER NR-CGI of gNB n
+//     (plan R-3); the gNB 3 message equals what rc with the Testbed patch set
+//     sends;
+//   - tests/fixtures/rc-control-requests.hex: the 30 RICcontrolRequests rc
+//     a2282ee sent in the pre-M8 probe, with the unbounded RANParameter-ID
+//     encoding and the 9-octet pre-R-3 target; every one must be refused.
+// Each case prints PASS/FAIL <name>;
 // exit 0 only if all pass. It also prints the ACK's RIC Control Outcome octets
 // (OUTCOME_HEX) and the whole ACK PDU (ACK_PDU_HEX) for the gate to decode
 // with the independent decoder (tools/rc-decode) and tshark.
 //
-// usage: rc-control-test <fixture.hex>
+// usage: rc-control-test <m8-fixture.hex> <nrcgi-fixture.hex>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -160,44 +165,64 @@ bool one_failure(const Harness &h, long cause, long reqId) {
 
 }  // namespace
 
-int main(int argc, char **argv) {
-  if (argc != 2) {
-    fprintf(stderr, "usage: %s <fixture.hex>\n", argv[0]);
-    return 2;
-  }
-  std::ifstream f(argv[1]);
-  std::string line, frame, hh, mh;
-  std::vector<std::pair<Bytes, Bytes>> fx;
+struct FixtureLine {
+  std::string id;
+  Bytes header, message;
+};
+
+std::vector<FixtureLine> load_fixture(const char *path) {
+  std::ifstream f(path);
+  std::string line;
+  std::vector<FixtureLine> fx;
   while (std::getline(f, line)) {
     std::istringstream is(line);
-    if (is >> frame >> hh >> mh) fx.emplace_back(from_hex(hh), from_hex(mh));
+    std::string id, hh, mh;
+    if (is >> id >> hh >> mh) fx.push_back({id, from_hex(hh), from_hex(mh)});
   }
-  verdict("fixture-loaded", !fx.empty(), std::to_string(fx.size()) + " PDUs");
-  if (fx.empty()) return 1;
+  return fx;
+}
 
-  // Every fixture PDU decodes with the agent's codec: style 3, action 1, AMF-UE-NGAP-ID k+1 on line k (the probe
-  // numbered its calls; tools/rc-decode agrees), and the M8-era target 00|PLMN|00000000|03.
-  const Bytes m8Target = from_hex("0000f1100000000003");
+int main(int argc, char **argv) {
+  if (argc != 3) {
+    fprintf(stderr, "usage: %s <m8-fixture.hex> <nrcgi-fixture.hex>\n", argv[0]);
+    return 2;
+  }
+  const std::vector<FixtureLine> m8 = load_fixture(argv[1]), x691 = load_fixture(argv[2]);
+  verdict("fixture-loaded", m8.size() == 30 && !x691.empty(),
+          std::to_string(m8.size()) + " M8 PDUs, " + std::to_string(x691.size()) + " X.691 PDUs");
+  if (m8.empty() || x691.empty()) return 1;
+
+  // Every X.691 line decodes with the agent's codec: style 3, action 1, AMF-UE-NGAP-ID k and the NR-CGI of gNB n
+  // named by its id "s3a1-imsi<k>-gnb<n>".
   int good = 0;
-  for (size_t k = 0; k < fx.size(); k++) {
-    auto &p = fx[k];
+  const FixtureLine *gnb3 = nullptr;
+  for (const auto &p : x691) {
+    unsigned long imsi = 0, gnb = 0;
     rcc_control c;
     char err[256];
-    if (rcc_decode_control(p.first.data(), p.first.size(), p.second.data(), p.second.size(), &c, err, sizeof err) == 0 &&
-        c.style == 3 && c.action == 1 && c.amfUeNgapId == k + 1 && Bytes(c.targetOctets, c.targetOctets + c.targetLen) == m8Target)
+    char want[19];
+    if (sscanf(p.id.c_str(), "s3a1-imsi%lu-gnb%lu", &imsi, &gnb) != 2) continue;
+    snprintf(want, sizeof want, "0000f110%08lx10", gnb);
+    if (rcc_decode_control(p.header.data(), p.header.size(), p.message.data(), p.message.size(), &c, err, sizeof err) ==
+            0 &&
+        c.style == 3 && c.action == 1 && c.amfUeNgapId == (uint64_t)imsi &&
+        Bytes(c.targetOctets, c.targetOctets + c.targetLen) == from_hex(want))
       good++;
+    if (gnb == 3 && imsi == 1) gnb3 = &p;
   }
-  verdict("fixture-decodes", good == (int)fx.size(), std::to_string(good) + "/" + std::to_string(fx.size()));
+  verdict("fixture-decodes", good == (int)x691.size() && gnb3,
+          std::to_string(good) + "/" + std::to_string(x691.size()) + " X.691 PDUs");
+  if (!gnb3) return 1;
 
-  const Bytes &hdr = fx[0].first, &msgM8 = fx[0].second;
+  const Bytes &hdr = gnb3->header, &msg = gnb3->message;
   uint8_t buf[256];
   auto with_target = [&](const char *hex) {
     Bytes t = from_hex(hex);
-    long n = rcc_test_reencode_target(msgM8.data(), msgM8.size(), t.data(), t.size(), buf, sizeof buf);
+    long n = rcc_test_reencode_target(msg.data(), msg.size(), t.data(), t.size(), buf, sizeof buf);
     return Bytes(buf, buf + (n > 0 ? n : 0));
   };
-  // APER NR-CGI of gNB 3 (PLMN 00F110, NCI 0x000000031, 4 zero pad bits), the form rc sends after the R-3 switch.
-  const Bytes msg = with_target("0000f1100000000310");
+  // The agent's codec re-encodes the gNB 3 message to the same X.691 octets.
+  verdict("agent-codec-reencode-equals-x691", with_target("0000f1100000000310") == msg);
   {
     TargetCell t;
     std::string terr;
@@ -211,10 +236,15 @@ int main(int argc, char **argv) {
     h.request(control_request(17, 1, 3, hdr, with_target("0000f1100000000303"), -1));
     verdict("n5-target-refused", one_failure(h, CauseRICrequest_control_message_invalid, 17));
   }
-  {  // a request exactly as rc sent it in M8 -> refused
-    Harness h;
-    h.request(control_request(18, 1, 3, hdr, msgM8, -1));
-    verdict("m8-capture-refused", one_failure(h, CauseRICrequest_control_message_invalid, 18));
+  {  // every request exactly as rc a2282ee sent it in M8 -> refused
+    int refused = 0;
+    for (size_t k = 0; k < m8.size(); k++) {
+      Harness h;
+      h.request(control_request(18, 1, 3, m8[k].header, m8[k].message, -1));
+      refused += one_failure(h, CauseRICrequest_control_message_invalid, 18) ? 1 : 0;
+    }
+    verdict("m8-capture-refused", refused == (int)m8.size(),
+            std::to_string(refused) + "/" + std::to_string(m8.size()) + " control-message-invalid");
   }
   {  // another PLMN (00F220) or cell part 2 -> refused
     Harness h1, h2;

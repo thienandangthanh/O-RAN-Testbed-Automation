@@ -4,12 +4,14 @@
 #
 #   - asserts e2-interface is at the pinned commit da6f82f2 and that NIST's
 #     e2sim patch (e2ap_message_handler.cpp) is in place, i.e. install_e2sim.sh ran;
-#   - copies this directory to e2-interface/e2sim/e2sm_examples/ns3_e2_agent;
+#   - copies this directory to e2-interface/e2sim/e2sm_examples/ns3_e2_agent, and
+#     the rc patch set (install_patch_files/xApps/rc) to its rc_patches/: the agent
+#     builds librc_codec from rc's e2sm code with the patches the rc xApp gets;
 #   - docker build with NIST's context (e2-interface/e2sim) and registry;
 #   - writes ns3_e2_agent/run/image.env (image name and ID) for run_ns3_e2_agents.sh.
 #
 # Env: E2_INTERFACE_DIR (default <Near-Real-Time-RIC>/e2-interface),
-#      NS3_E2_AGENT_TAG (default: Testbed short SHA, "-dirty" if ns3_e2_agent/ has changes),
+#      NS3_E2_AGENT_TAG (default: Testbed short SHA, "-dirty" if ns3_e2_agent/ or the rc patch set has changes),
 #      CONTAINER_PULL_REGISTRY (default nexus3.o-ran-sc.org:10002, as install_e2sim.sh),
 #      BUILD_TIMEOUT_S (default 3600).
 # Non-interactive and idempotent: a re-run rebuilds the same tag.
@@ -32,21 +34,27 @@ patched="$NRT_DIR/install_patch_files/e2-interface/e2sim/src/messagerouting/e2ap
 cmp -s "$patched" "$E2_INTERFACE_DIR/e2sim/src/messagerouting/e2ap_message_handler.cpp" ||
 	die "NIST's e2sim patch is not applied in $E2_INTERFACE_DIR (run install_e2sim.sh first)"
 
+RC_PATCH_DIR="$NRT_DIR/install_patch_files/xApps/rc"
+[ -f "$RC_PATCH_DIR/patches.manifest" ] || die "no rc patch set at $RC_PATCH_DIR"
+
 if [ -z "${NS3_E2_AGENT_TAG:-}" ]; then
 	NS3_E2_AGENT_TAG=$(git -C "$AGENT_DIR" rev-parse --short=12 HEAD)
-	if [ -n "$(git -C "$AGENT_DIR" status --porcelain -- . 2>/dev/null)" ]; then
+	if [ -n "$(git -C "$AGENT_DIR" status --porcelain -- . "$RC_PATCH_DIR" 2>/dev/null)" ]; then
 		NS3_E2_AGENT_TAG="$NS3_E2_AGENT_TAG-dirty"
 	fi
 fi
 IMAGE="ns3-e2-agent:$NS3_E2_AGENT_TAG"
 
-python3 -I "$AGENT_DIR/tests/lint-metric-map.py" "$AGENT_DIR/schema/metric-map.v1.json"
+python3 -I "$AGENT_DIR/tests/lint-metric-map.py" "$AGENT_DIR/schema/metric-map.v1.json" \
+	--kpimon-enb "$NRT_DIR/install_patch_files/xApps/kpimon-go/control/enb-kpm-measurements.json"
 
 dest="$E2_INTERFACE_DIR/e2sim/e2sm_examples/ns3_e2_agent"
 rm -rf "$dest"
 mkdir -p "$dest"
 tar -C "$AGENT_DIR" --exclude=./run -cf - . | tar -C "$dest" -xf -
-echo "Copied the agent to $dest"
+mkdir -p "$dest/rc_patches"
+cp "$RC_PATCH_DIR"/* "$dest/rc_patches/"
+echo "Copied the agent to $dest and the rc patch set to $dest/rc_patches"
 
 echo "Building $IMAGE (timeout ${BUILD_TIMEOUT_S}s)..."
 (cd "$E2_INTERFACE_DIR/e2sim" &&

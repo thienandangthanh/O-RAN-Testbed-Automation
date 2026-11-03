@@ -143,7 +143,7 @@ void check_setup(const char *who, E2AP_PDU_t *p, const Config &cfg, const std::v
 
 }  // namespace
 
-int probe_e2ap(const std::string &dir, const Bytes &def) {
+int probe_e2ap(const std::string &dir, const Bytes &def, const Bytes &enbDef) {
   Config cfg;
   cfg.nodeId = 2;
   cfg.kind = "gnb";
@@ -168,7 +168,8 @@ int probe_e2ap(const std::string &dir, const Bytes &def) {
   enb.kind = "enb";
   enb.x2Peers = {2, 3};
   std::vector<RanFunctionSpec> efuncs;
-  check(node_ran_functions(enb, def, efuncs, err) && efuncs.size() == 1, ("eNB RAN function 2 only " + err).c_str());
+  check(node_ran_functions(enb, enbDef, efuncs, err) && efuncs.size() == 1 && efuncs[0].definition == enbDef,
+        ("eNB RAN function 2 only, from the eNB lists " + err).c_str());
   check(build_setup_request(enb, efuncs, 1, b, err), ("build E2SetupRequest eNB 1 " + err).c_str());
   if (E2AP_PDU_t *p = roundtrip(dir, "setup-request-enb", b)) {
     check_setup("setup eNB 1", p, enb, efuncs, {{kReqEnb1, kRspEnGnb[0]}, {kReqEnb1, kRspEnGnb[1]}});

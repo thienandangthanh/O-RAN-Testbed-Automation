@@ -88,6 +88,6 @@ target_link_libraries(sctp-ppid-loopback-test ns3_e2_agent_core)
 install(TARGETS ns3-e2-agent codec-probe rc-control-test kpm-report-period-test sctp-ppid-loopback-test
         DESTINATION bin)
 install(TARGETS rc_codec x2ap_codec DESTINATION lib)
-install(FILES tests/fixtures/rc-control-requests.hex tests/fixtures/ipc-samples-gnb2-seq26-35.jsonl
+install(FILES tests/fixtures/rc-control-requests.hex tests/fixtures/rc-control-nrcgi.hex tests/fixtures/ipc-samples-gnb2-seq26-35.jsonl
               tests/fixtures/kpm-tt-golden-gnb2-seq26-35.txt tests/fixtures/kpimon-subscription-octets.txt
         DESTINATION share/ns3-e2-agent)

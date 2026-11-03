@@ -52,10 +52,15 @@ RUN dpkg -i /playpen/e2sim/build/e2sim_1.0.0_amd64.deb /playpen/e2sim/build/e2si
 RUN rm -rf /playpen/e2sim
 
 # ric-app-rc's own generated E2SM-RC v2.0 code, for librc_codec.so (the code
-# rc encodes its RIC CONTROL requests with), at the rc commit NIST installs.
+# rc encodes its RIC CONTROL requests with), at the rc commit NIST installs, with
+# the Testbed rc patch set (install_patch_files/xApps/rc, copied next to the agent
+# by install_ns3_e2_agent.sh) applied in manifest order, as the rc installer does.
 ARG RC_SHA=a2282eedc9e32f60298bf530456ad367bef0824b
+COPY e2sm_examples/ns3_e2_agent/rc_patches/ /playpen/rc-patches/
 RUN git clone -q https://github.com/o-ran-sc/ric-app-rc.git /playpen/rc && git -C /playpen/rc checkout -q $RC_SHA \
-	&& test "$(git -C /playpen/rc rev-parse HEAD)" = "$RC_SHA"
+	&& test "$(git -C /playpen/rc rev-parse HEAD)" = "$RC_SHA" \
+	&& grep -vE '^\s*(#|$)' /playpen/rc-patches/patches.manifest >/tmp/rc-patches.txt && test -s /tmp/rc-patches.txt \
+	&& while read -r p; do git -C /playpen/rc apply --whitespace=nowarn "/playpen/rc-patches/$p" || exit 1; done </tmp/rc-patches.txt
 
 # asn1c for the X2AP codec: the commit whose skeleton runtime equals NIST's
 # e2sim/asn1c tree (x2ap_codec/SOURCES.txt); the generated C goes to /playpen/x2ap-gen.
@@ -81,6 +86,7 @@ RUN mkdir -p /etc/ns3-e2-agent && cp /playpen/agent/schema/metric-map.v1.json /e
 	&& sha256sum /etc/ns3-e2-agent/metric-map.v1.json
 # The image is kept only if the agent's codec and control-path unit tests pass.
 RUN mkdir /tmp/codec-probe && codec-probe /etc/ns3-e2-agent/metric-map.v1.json /tmp/codec-probe \
-	&& rc-control-test /usr/local/share/ns3-e2-agent/rc-control-requests.hex && rm -rf /tmp/codec-probe
+	&& rc-control-test /usr/local/share/ns3-e2-agent/rc-control-requests.hex \
+		/usr/local/share/ns3-e2-agent/rc-control-nrcgi.hex && rm -rf /tmp/codec-probe
 
 ENTRYPOINT ["/usr/local/bin/ns3-e2-agent"]
