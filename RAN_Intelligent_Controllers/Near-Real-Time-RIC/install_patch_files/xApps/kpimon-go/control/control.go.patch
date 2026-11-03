@@ -1,9 +1,12 @@
 diff --git a/control/control.go b/control/control.go
-index 92b2098..60b5c53 100644
+index 90464d4..fbbd090 100644
 --- a/control/control.go
 +++ b/control/control.go
-@@ -15,9 +15,10 @@ import (
+@@ -13,11 +13,13 @@ import (
+ 	"fmt"
+ 	"log"
  	"net/http"
++	"os"
  	"reflect"
  	"strconv"
 +	"strings"
@@ -14,21 +17,74 @@ index 92b2098..60b5c53 100644
  
  	"gerrit.o-ran-sc.org/r/ric-plt/xapp-frame/pkg/clientmodel"
  	"gerrit.o-ran-sc.org/r/ric-plt/xapp-frame/pkg/xapp"
-@@ -52,6 +53,9 @@ var Glob_Ran_cell = make(map[string][]string)
+@@ -52,6 +54,57 @@ var Glob_Ran_cell = make(map[string][]string)
  var Glob_cell_Plmn = make(map[string]string)
  var ranUeKpi = make(map[string][]string)
  var ranCellKpi = make(map[string][]string)
 +var metricsMu sync.RWMutex
++
++// KPM subscription parameters (ms): the E2SM-KPM event trigger's reportingPeriod
++// and the action definitions' granulPeriod. They come from the controls section
++// of the xApp descriptor (deploy/config.json, written by
++// install_xapp_kpi_monitor.sh), which dms_cli mounts at xappDescriptorPath;
++// xapp.Config reads the image's CFG_FILE (/opt/config-file.yaml) instead.
++const xappDescriptorPath = "/opt/ric/config/config-file.json"
++
++var reportingPeriodMs, granularityPeriodMs uint32
++
++// loadKpmControls reads controls.reportingPeriodMs and controls.granularityPeriodMs
++// (integers 1..4294967295, required) from the xApp descriptor at path.
++func loadKpmControls(path string) (uint32, uint32, error) {
++	raw, err := os.ReadFile(path)
++	if err != nil {
++		return 0, 0, fmt.Errorf("reading the xApp descriptor: %v", err)
++	}
++	var d struct {
++		Controls struct {
++			ReportingPeriodMs   *uint32 `json:"reportingPeriodMs"`
++			GranularityPeriodMs *uint32 `json:"granularityPeriodMs"`
++		} `json:"controls"`
++	}
++	if err = json.Unmarshal(raw, &d); err != nil {
++		return 0, 0, fmt.Errorf("%s: controls.reportingPeriodMs/granularityPeriodMs: %v", path, err)
++	}
++	rp, gp := d.Controls.ReportingPeriodMs, d.Controls.GranularityPeriodMs
++	if rp == nil || gp == nil || *rp == 0 || *gp == 0 {
++		return 0, 0, fmt.Errorf("%s: controls.reportingPeriodMs and controls.granularityPeriodMs must be positive integers", path)
++	}
++	return *rp, *gp, nil
++}
++
++// encodeEventTrigger APER-encodes an E2SM-KPM-EventTriggerDefinition Format 1
++// with the given reporting period (kpimon's own E2SM library).
++func encodeEventTrigger(periodMs uint32) (clientmodel.EventTriggerDefinition, error) {
++	var buf [16]C.uchar
++	n := C.e2sm_encode_kpm_event_trigger_format1(unsafe.Pointer(&buf[0]), C.size_t(len(buf)), C.ulong(periodMs))
++	if n <= 0 {
++		return nil, fmt.Errorf("cannot encode an event trigger with reportingPeriod %d ms", periodMs)
++	}
++	trigger := make(clientmodel.EventTriggerDefinition, 0, int(n))
++	for i := 0; i < int(n); i++ {
++		trigger = append(trigger, int64(buf[i]))
++	}
++	return trigger, nil
++}
++
 +var subscriptionMu sync.Mutex
 +var subscribed = make(map[string]bool)
  
  func (c Control) Consume(msg *xapp.RMRParams) error {
  	id := xapp.Rmr.GetRicMessageName(msg.Mtype)
-@@ -69,17 +73,17 @@ func (c Control) Consume(msg *xapp.RMRParams) error {
+@@ -69,17 +122,22 @@ func (c Control) Consume(msg *xapp.RMRParams) error {
  
  func NewControl() Control {
  	xapp.Logger.Info("In new control")
 -	create_db()
++	var err error
++	if reportingPeriodMs, granularityPeriodMs, err = loadKpmControls(xappDescriptorPath); err != nil {
++		log.Fatalf("KPM subscription parameters: %v", err)
++	}
++	xapp.Logger.Info("KPM subscription: reportingPeriod %d ms, granulPeriod %d ms", reportingPeriodMs, granularityPeriodMs)
 +// 	create_db()
  	xapp.Logger.Info("returning control")
  	return Control{
@@ -45,7 +101,7 @@ index 92b2098..60b5c53 100644
  	if err != nil {
  		xapp.Logger.Error("Create database failed!")
  	}
-@@ -97,8 +101,8 @@ func (c Control) getEnbList() ([]*xapp.RNIBNbIdentity, error) {
+@@ -97,8 +155,8 @@ func (c Control) getEnbList() ([]*xapp.RNIBNbIdentity, error) {
  	for _, enb := range enbs {
  		connected_enb_names = append(connected_enb_names, enb.InventoryName)
  	}
@@ -56,7 +112,7 @@ index 92b2098..60b5c53 100644
  	return enbs, nil
  }
  
-@@ -114,7 +118,7 @@ func (c *Control) getGnbList() ([]*xapp.RNIBNbIdentity, error) {
+@@ -114,7 +172,7 @@ func (c *Control) getGnbList() ([]*xapp.RNIBNbIdentity, error) {
  	for _, gnb := range gnbs {
  		connected_gnb_names = append(connected_gnb_names, gnb.InventoryName)
  	}
@@ -65,7 +121,31 @@ index 92b2098..60b5c53 100644
  
  	return gnbs, nil
  }
-@@ -321,7 +325,13 @@ func encode_actionsToBeSetup(meid string) clientmodel.ActionsToBeSetup {
+@@ -196,7 +254,7 @@ func encode_action_format1(plmn string, cellid string, meid string) clientmodel.
+ 	defer C.free(unsafe.Pointer(cString)) // Free the allocated C string when done
+ 	// Call the C function
+ 	determine := 2 //2 for format1 by name
+-	result := C.encode_action_Definition(cString, C.int(determine))
++	result := C.encode_action_Definition(cString, C.int(determine), C.ulong(granularityPeriodMs))
+ 
+ 	for i := 0; i < int(result.length); i++ {
+ 		value := int64(*(*int32)(unsafe.Pointer(uintptr(unsafe.Pointer(result.array)) + uintptr(i*4))))
+@@ -252,9 +310,12 @@ func encode_action_format3(meid string) clientmodel.ActionDefinition {
+ 	cString := C.CString(resp.Gnb.RanFunctions[counter].RanFunctionDefinition)
+ 	defer C.free(unsafe.Pointer(cString)) // Free the allocated C string when done
+ 	// Call the C function
+-	determine := 4 //2 for format1 by name
++	// 3: format 3 by measID. By name, the definition of a long UE list exceeds
++	// 1024 octets, the fixed OctetString_t buffer of the L-release SubMgr's E2AP
++	// wrapper (e2ap/libe2ap_wrapper/E2AP_if.h), which corrupts the octets past it.
++	determine := 3
+ 
+-	result := C.encode_action_Definition(cString, C.int(determine))
++	result := C.encode_action_Definition(cString, C.int(determine), C.ulong(granularityPeriodMs))
+ 	for i := 0; i < int(result.length); i++ {
+ 		value := int64(*(*int32)(unsafe.Pointer(uintptr(unsafe.Pointer(result.array)) + uintptr(i*4))))
+ 		format3 = append(format3, value)
+@@ -321,7 +382,13 @@ func encode_actionsToBeSetup(meid string) clientmodel.ActionsToBeSetup {
  	*/
  
  	var n int64 = 1
@@ -80,7 +160,7 @@ index 92b2098..60b5c53 100644
  	//fmt.Println("len of Tonga cells= ",len(cells))
  	//fmt.Println("Tonga cells = ", cells)
  	//fmt.Println("Tonga  = ", Glob_Ran_cell)
-@@ -345,7 +355,7 @@ func encode_actionsToBeSetup(meid string) clientmodel.ActionsToBeSetup {
+@@ -345,7 +412,7 @@ func encode_actionsToBeSetup(meid string) clientmodel.ActionsToBeSetup {
  		s := clientmodel.ActionToBeSetup{
  			ActionID:         lol,
  			ActionType:       &actionType,
@@ -89,7 +169,7 @@ index 92b2098..60b5c53 100644
  			SubsequentAction: &clientmodel.SubsequentAction{
  				SubsequentActionType: &subsequentActionType,
  				TimeToWait:           &timeToWait,
-@@ -394,7 +404,7 @@ func encode_actionsToBeSetup(meid string) clientmodel.ActionsToBeSetup {
+@@ -394,7 +461,7 @@ func encode_actionsToBeSetup(meid string) clientmodel.ActionsToBeSetup {
  	return l
  
  }
@@ -98,7 +178,30 @@ index 92b2098..60b5c53 100644
  	//Create Subscription message and send it to RIC platform
  	xapp.Logger.Info("Sending subscription request for MEID: %v", meid)
  	/*
-@@ -451,9 +461,14 @@ func (c Control) sendSubscription(meid string) {
+@@ -426,16 +493,18 @@ func (c Control) sendSubscription(meid string) {
+ 		}
+ 	*/
+ 
+-	//8,39,15, for 10000 ms reporting period
++	eventTrigger, err := encodeEventTrigger(reportingPeriodMs)
++	if err != nil {
++		xapp.Logger.Error("Subscription (%s) not sent: %v", meid, err)
++		return false
++	}
+ 	subscritionParams := clientmodel.SubscriptionParams{
+ 		ClientEndpoint: &clientEndpoint,
+ 		Meid:           &meid,
+ 		RANFunctionID:  &funcId,
+ 		SubscriptionDetails: clientmodel.SubscriptionDetailsList{
+ 			&clientmodel.SubscriptionDetail{
+-				EventTriggers: clientmodel.EventTriggerDefinition{
+-					8, 39, 15,
+-				},
++				EventTriggers:       eventTrigger,
+ 				XappEventInstanceID: &seqId,
+ 				ActionToBeSetupList: encode_actionsToBeSetup(meid),
+ 			},
+@@ -451,9 +520,14 @@ func (c Control) sendSubscription(meid string) {
  	resp, err := xapp.Subscription.Subscribe(&subscritionParams)
  	if err != nil {
  		xapp.Logger.Error("Subscription (%s) failed  with error: %s", meid, err)
@@ -114,7 +217,7 @@ index 92b2098..60b5c53 100644
  }
  
  func Test() (err error) {
-@@ -761,7 +776,9 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
+@@ -761,7 +835,9 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
  			fmt.Printf(" \n No of cell metrics = %d\n", no_of_cell_metrics)
  			//values := make(map[string]interface{}, v.NumField())
  			values := make(map[string]interface{})
@@ -125,10 +228,12 @@ index 92b2098..60b5c53 100644
  			var tmpCellKpi []string
  			for _, ele := range CellKpi {
  				if ele != "" {
-@@ -812,7 +829,9 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
+@@ -810,9 +886,9 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
+ 		//no_of_ue_metrics:=int32(indMsgFormat2_C .measData.list.count)
+ 		//fmt.Printf(" \n No of ue metrics = %d\n",no_of_ue_metrics)
  
- 		var sizeof_MeasurementDataItem_t *C.MeasurementDataItem_t
- 		MeasurementDataItem_C := *(**C.MeasurementDataItem_t)(unsafe.Pointer(uintptr(unsafe.Pointer(indMsgFormat2_C.measData.list.array)) + (uintptr)(0)*unsafe.Sizeof(sizeof_MeasurementDataItem_t)))
+-		var sizeof_MeasurementDataItem_t *C.MeasurementDataItem_t
+-		MeasurementDataItem_C := *(**C.MeasurementDataItem_t)(unsafe.Pointer(uintptr(unsafe.Pointer(indMsgFormat2_C.measData.list.array)) + (uintptr)(0)*unsafe.Sizeof(sizeof_MeasurementDataItem_t)))
 -		UeKpi := ranUeKpi[params.Meid.RanName]
 +		metricsMu.RLock()
 +		UeKpi := append([]string(nil), ranUeKpi[params.Meid.RanName]...)
@@ -136,7 +241,111 @@ index 92b2098..60b5c53 100644
  		var tmpUeKpi []string
  		for _, ele := range UeKpi {
  			if ele != "" {
-@@ -880,7 +899,7 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
+@@ -820,54 +896,62 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
+ 			}
+ 		}
+ 
+-		no_of_ue := int32(MeasurementDataItem_C.measRecord.list.count) / int32(len(tmpUeKpi))
+-		no_of_ue_metrics := int32(len(tmpUeKpi))
+-		fmt.Printf(" \n No of ue= %d\n", no_of_ue)
+-
+-		for n := int32(0); n < no_of_ue; n++ {
+-			//var UeM UeMetricsEntry
+-			//v := reflect.ValueOf(UeM)
+-			//values := make(map[string]interface{}, v.NumField())
+-			values := make(map[string]interface{})
+-			//assert no_of_ue_metrics == v.NumField()   they both should be equal.
+-			//if (int(no_of_ue_metrics) != v.NumField()){
+-			//log.Printf("no_of_ue_metrics != v.NumField()")
+-			//return errors.New("no_of_ue_metrics != v.NumField()")
+-			//}
+-			for i := int32(0); i < no_of_ue_metrics; i++ {
+-				//fmt.Println(i)
+-				//if v.Field(int(i)).CanInterface() {
++		// One measData item per granularity period of the reporting period.
++		var sizeof_MeasurementDataItem_t *C.MeasurementDataItem_t
++		for t := int32(0); t < int32(indMsgFormat2_C.measData.list.count); t++ {
++			MeasurementDataItem_C := *(**C.MeasurementDataItem_t)(unsafe.Pointer(uintptr(unsafe.Pointer(indMsgFormat2_C.measData.list.array)) + (uintptr)(t)*unsafe.Sizeof(sizeof_MeasurementDataItem_t)))
++			no_of_ue := int32(MeasurementDataItem_C.measRecord.list.count) / int32(len(tmpUeKpi))
++			no_of_ue_metrics := int32(len(tmpUeKpi))
++			fmt.Printf(" \n No of ue= %d\n", no_of_ue)
++
++			for n := int32(0); n < no_of_ue; n++ {
++				//var UeM UeMetricsEntry
++				//v := reflect.ValueOf(UeM)
++				//values := make(map[string]interface{}, v.NumField())
++				values := make(map[string]interface{})
++				//assert no_of_ue_metrics == v.NumField()   they both should be equal.
++				//if (int(no_of_ue_metrics) != v.NumField()){
++				//log.Printf("no_of_ue_metrics != v.NumField()")
++				//return errors.New("no_of_ue_metrics != v.NumField()")
++				//}
++				for i := int32(0); i < no_of_ue_metrics; i++ {
++					//fmt.Println(i)
++					//if v.Field(int(i)).CanInterface() {
+ 
+-				//var sizeof_MeasurementDataItem_t  *C.MeasurementDataItem_t
+-				//MeasurementDataItem_C:=*(**C.MeasurementDataItem_t)(unsafe.Pointer(uintptr(unsafe.Pointer(indMsgFormat2_C.measData.list.array)) + (uintptr)(i)*unsafe.Sizeof(sizeof_MeasurementDataItem_t)))
++					//var sizeof_MeasurementDataItem_t  *C.MeasurementDataItem_t
++					//MeasurementDataItem_C:=*(**C.MeasurementDataItem_t)(unsafe.Pointer(uintptr(unsafe.Pointer(indMsgFormat2_C.measData.list.array)) + (uintptr)(i)*unsafe.Sizeof(sizeof_MeasurementDataItem_t)))
+ 
+-				var sizeof_MeasurementRecordItem_t *C.MeasurementRecordItem_t
+-				MeasurementRecordItem_C := *(**C.MeasurementRecordItem_t)(unsafe.Pointer(uintptr(unsafe.Pointer(MeasurementDataItem_C.measRecord.list.array)) + (uintptr)(n+(i*no_of_ue))*unsafe.Sizeof(sizeof_MeasurementRecordItem_t)))
+-				//var sizeof_MeasurementRecordItem_t *C.MeasurementRecordItem_t
+-				//MeasurementRecordItem_C:=*(**C.MeasurementRecordItem_t)(unsafe.Pointer(uintptr(unsafe.Pointer(MeasurementDataItem_C.measRecord.list.array)) + (uintptr)(n)*unsafe.Sizeof(sizeof_MeasurementRecordItem_t)))
++					var sizeof_MeasurementRecordItem_t *C.MeasurementRecordItem_t
++					MeasurementRecordItem_C := *(**C.MeasurementRecordItem_t)(unsafe.Pointer(uintptr(unsafe.Pointer(MeasurementDataItem_C.measRecord.list.array)) + (uintptr)(n+(i*no_of_ue))*unsafe.Sizeof(sizeof_MeasurementRecordItem_t)))
++					//var sizeof_MeasurementRecordItem_t *C.MeasurementRecordItem_t
++					//MeasurementRecordItem_C:=*(**C.MeasurementRecordItem_t)(unsafe.Pointer(uintptr(unsafe.Pointer(MeasurementDataItem_C.measRecord.list.array)) + (uintptr)(n)*unsafe.Sizeof(sizeof_MeasurementRecordItem_t)))
+ 
+-				type_var := int(MeasurementRecordItem_C.present)
+-				if type_var == 1 {
+-					var cast_integer *C.long = (*C.long)(unsafe.Pointer(&MeasurementRecordItem_C.choice[0]))
+-					values[tmpUeKpi[int(i)]] = int32(*cast_integer)
+-				} else if type_var == 2 {
+-					var cast_float *C.double = (*C.double)(unsafe.Pointer(&MeasurementRecordItem_C.choice[0]))
+-					values[tmpUeKpi[int(i)]] = float64(*cast_float)
++					type_var := int(MeasurementRecordItem_C.present)
++					if type_var == 1 {
++						var cast_integer *C.long = (*C.long)(unsafe.Pointer(&MeasurementRecordItem_C.choice[0]))
++						values[tmpUeKpi[int(i)]] = int32(*cast_integer)
++					} else if type_var == 2 {
++						var cast_float *C.double = (*C.double)(unsafe.Pointer(&MeasurementRecordItem_C.choice[0]))
++						values[tmpUeKpi[int(i)]] = float64(*cast_float)
+ 
+-				} else {
+-					fmt.Printf("Wrong Data Type")
+-				}
++					} else {
++						fmt.Printf("Wrong Data Type")
++					}
+ 
+-				// }else {
+-				// fmt.Printf("sorry you have a unexported field (lower case) value you are trying to sneak past. Can not allow it: %v\n", v.Type().Field(int(i)).Name)
+-				// }
++					// }else {
++					// fmt.Printf("sorry you have a unexported field (lower case) value you are trying to sneak past. Can not allow it: %v\n", v.Type().Field(int(i)).Name)
++					// }
+ 
+-			} //end of inner for loop
+-			fmt.Println(values)
+-			fmt.Printf("Parsing UE Metric Done")
+-			c.writeUeMetrics_db(&values) //push UEmetrics map entry to database.
++				} //end of inner for loop
++				fmt.Println(values)
++				fmt.Printf("Parsing UE Metric Done")
++				if len(values) == 0 {
++					continue // a UE without any value in this period (noValue records): nothing to store
++				}
++				c.writeUeMetrics_db(&values) //push UEmetrics map entry to database.
+ 
+-		} // end of outer for loop
++			} // end of outer for loop
++		} // end of measData items
+ 		//parsing ue metrics done
+ 	} else {
+ 		fmt.Printf(" Invalid Indication message format")
+@@ -880,7 +964,7 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
  
  // func (c *Control) writeUeMetrics_db(ueMetrics UeMetricsEntry) {
  // 	//Write metric to InfluxDB using API
@@ -145,7 +354,7 @@ index 92b2098..60b5c53 100644
  // 	ueMetricsJSON, err := json.Marshal(ueMetrics)
  // 	if err != nil {
  // 		xapp.Logger.Error("Marshal UE Metrics failed!")
-@@ -893,7 +912,7 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
+@@ -893,7 +977,7 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
  // }
  
  // func (c *Control) writeCellMetrics_db(cellMetrics CellMetricsEntry) {
@@ -154,7 +363,7 @@ index 92b2098..60b5c53 100644
  // 	cellMetricsJSON, er := json.Marshal(cellMetrics)
  // 	if er != nil {
  // 		xapp.Logger.Error("Marshal Cell Metrics failed!")
-@@ -945,7 +964,7 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
+@@ -945,7 +1029,7 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
  	}
  */
  func (c *Control) writeUeMetrics_db(ueMetrics *map[string]interface{}) {
@@ -163,7 +372,7 @@ index 92b2098..60b5c53 100644
  	/*
  		ueMetricsJSON, err := json.Marshal(ueMetrics)
  		if err != nil {
-@@ -966,7 +985,7 @@ func (c *Control) writeUeMetrics_db(ueMetrics *map[string]interface{}) {
+@@ -966,7 +1050,7 @@ func (c *Control) writeUeMetrics_db(ueMetrics *map[string]interface{}) {
  }
  
  func (c *Control) writeCellMetrics_db(cellMetrics *map[string]interface{}) {
@@ -172,7 +381,7 @@ index 92b2098..60b5c53 100644
  	/*
  		cellMetricsJSON, er := json.Marshal(cellMetrics)
  		if er != nil {
-@@ -985,158 +1004,195 @@ func (c *Control) writeCellMetrics_db(cellMetrics *map[string]interface{}) {
+@@ -985,158 +1069,195 @@ func (c *Control) writeCellMetrics_db(cellMetrics *map[string]interface{}) {
  	xapp.Logger.Info("Wrote Cell Metrics to InfluxDB")
  }
  
@@ -200,7 +409,20 @@ index 92b2098..60b5c53 100644
 -			if err != nil {
 -				log.Fatalln(err)
 -				panic("Unable to build ranCellKpi")
--
++func (c Control) initializeNode(nb *xapp.RNIBNbIdentity) bool {
++	xapp.Logger.Info("Building KPI metadata for %v", nb.InventoryName)
++	link := "http://service-ricplt-e2mgr-http.ricplt.svc.cluster.local:3800/v1/nodeb/" + nb.InventoryName
++	tmpr, err := http.Get(link)
++	if err != nil {
++		xapp.Logger.Error("Unable to read E2 node %s from E2Mgr: %v", nb.InventoryName, err)
++		return false
++	}
++	defer tmpr.Body.Close()
++	if tmpr.StatusCode != http.StatusOK {
++		xapp.Logger.Error("E2Mgr returned %s for E2 node %s", tmpr.Status, nb.InventoryName)
++		return false
++	}
+ 
 -			}
 -			counter := 0
 -			//RanFunctionId=2 for kpm in viavi
@@ -213,18 +435,43 @@ index 92b2098..60b5c53 100644
 -			cString := C.CString(resp.Gnb.RanFunctions[counter].RanFunctionDefinition)
 -			defer C.free(unsafe.Pointer(cString)) // Free the allocated C string when done
 -			result := C.buildRanCellUeKpi(cString)
--
++	var resp E2mgrResponse
++	if err = json.NewDecoder(tmpr.Body).Decode(&resp); err != nil {
++		xapp.Logger.Error("Unable to decode E2 node %s from E2Mgr: %v", nb.InventoryName, err)
++		return false
++	}
+ 
 -			ueSlice := make([]string, result.ueKpiSize)
--
++	counter := -1
++	for i := 0; i < len(resp.Gnb.RanFunctions); i++ {
++		if resp.Gnb.RanFunctions[i].RanFunctionId == int(funcId) {
++			counter = i
++			break
++		}
++	}
++	if counter == -1 {
++		xapp.Logger.Error("E2 node %s does not advertise RAN function %d", nb.InventoryName, funcId)
++		return false
++	}
++	cString := C.CString(resp.Gnb.RanFunctions[counter].RanFunctionDefinition)
++	defer C.free(unsafe.Pointer(cString)) // Free the allocated C string when done
++	result := C.buildRanCellUeKpi(cString)
+ 
 -			for _, v := range unsafe.Slice(result.ueKpi, result.ueKpiSize) {
 -				ueSlice = append(ueSlice, C.GoString(v))
 -			}
 -			ranUeKpi[nb.InventoryName] = ueSlice
 -			//fmt.Println("len of ranUeKpi= ",len(ranUeKpi))
 -			//fmt.Println("ranUeKpi map = ", ranUeKpi)
--
++	ueSlice := make([]string, 0, int(result.ueKpiSize))
+ 
 -			cellSlice := make([]string, result.cellKpiSize)
--
++	for _, v := range unsafe.Slice(result.ueKpi, result.ueKpiSize) {
++		ueSlice = append(ueSlice, C.GoString(v))
++	}
++	//fmt.Println("len of ranUeKpi= ",len(ranUeKpi))
++	//fmt.Println("ranUeKpi map = ", ranUeKpi)
+ 
 -			for _, v := range unsafe.Slice(result.cellKpi, result.cellKpiSize) {
 -				cellSlice = append(cellSlice, C.GoString(v))
 -			}
@@ -277,69 +524,13 @@ index 92b2098..60b5c53 100644
 -				panic(err4)
 -			}
 -			defer response.Body.Close()
--
++	cellSlice := make([]string, 0, int(result.cellKpiSize))
+ 
 -			var response2 APIResponse
 -			if err5 := json.NewDecoder(response.Body).Decode(&response2); err5 != nil {
 -				fmt.Println("Error decoding response:", err5)
 -				panic(err5)
 -			}
--
--			fmt.Printf("f1apSever Response: %+v\n", response2)
--
--			Glob_Ran_cell[nb.InventoryName] = response2.Cellids
--			for i := 0; i < len(response2.Cellids); i++ {
--				Glob_cell_Plmn[response2.Cellids[i]] = response2.PlmnIds[i]
--			}
--
--			//C.freeMemorydRanCellUeKpi(result)
--
--		}
--
-+func (c Control) initializeNode(nb *xapp.RNIBNbIdentity) bool {
-+	xapp.Logger.Info("Building KPI metadata for %v", nb.InventoryName)
-+	link := "http://service-ricplt-e2mgr-http.ricplt.svc.cluster.local:3800/v1/nodeb/" + nb.InventoryName
-+	tmpr, err := http.Get(link)
-+	if err != nil {
-+		xapp.Logger.Error("Unable to read E2 node %s from E2Mgr: %v", nb.InventoryName, err)
-+		return false
-+	}
-+	defer tmpr.Body.Close()
-+	if tmpr.StatusCode != http.StatusOK {
-+		xapp.Logger.Error("E2Mgr returned %s for E2 node %s", tmpr.Status, nb.InventoryName)
-+		return false
-+	}
-+
-+	var resp E2mgrResponse
-+	if err = json.NewDecoder(tmpr.Body).Decode(&resp); err != nil {
-+		xapp.Logger.Error("Unable to decode E2 node %s from E2Mgr: %v", nb.InventoryName, err)
-+		return false
-+	}
-+
-+	counter := -1
-+	for i := 0; i < len(resp.Gnb.RanFunctions); i++ {
-+		if resp.Gnb.RanFunctions[i].RanFunctionId == int(funcId) {
-+			counter = i
-+			break
-+		}
-+	}
-+	if counter == -1 {
-+		xapp.Logger.Error("E2 node %s does not advertise RAN function %d", nb.InventoryName, funcId)
-+		return false
-+	}
-+	cString := C.CString(resp.Gnb.RanFunctions[counter].RanFunctionDefinition)
-+	defer C.free(unsafe.Pointer(cString)) // Free the allocated C string when done
-+	result := C.buildRanCellUeKpi(cString)
-+
-+	ueSlice := make([]string, 0, int(result.ueKpiSize))
-+
-+	for _, v := range unsafe.Slice(result.ueKpi, result.ueKpiSize) {
-+		ueSlice = append(ueSlice, C.GoString(v))
-+	}
-+	//fmt.Println("len of ranUeKpi= ",len(ranUeKpi))
-+	//fmt.Println("ranUeKpi map = ", ranUeKpi)
-+
-+	cellSlice := make([]string, 0, int(result.cellKpiSize))
-+
 +	for _, v := range unsafe.Slice(result.cellKpi, result.cellKpiSize) {
 +		cellSlice = append(cellSlice, C.GoString(v))
 +	}
@@ -374,7 +565,8 @@ index 92b2098..60b5c53 100644
 +		                        for _, v := range unsafe.Slice(result2.plmn, result2.size) {
 +		                                plmnList = append(plmnList, C.GoString(v))
 +		                        }
-+
+ 
+-			fmt.Printf("f1apSever Response: %+v\n", response2)
 +	*/
 +	/*
 +		var f1ap *F1ap
@@ -396,7 +588,11 @@ index 92b2098..60b5c53 100644
 +			response2 = APIResponse{}
 +		}
 +	}
-+
+ 
+-			Glob_Ran_cell[nb.InventoryName] = response2.Cellids
+-			for i := 0; i < len(response2.Cellids); i++ {
+-				Glob_cell_Plmn[response2.Cellids[i]] = response2.PlmnIds[i]
+-			}
 +	metricsMu.Lock()
 +	ranUeKpi[nb.InventoryName] = ueSlice
 +	ranCellKpi[nb.InventoryName] = cellSlice
@@ -405,11 +601,13 @@ index 92b2098..60b5c53 100644
 +		Glob_cell_Plmn[response2.Cellids[i]] = response2.PlmnIds[i]
 +	}
 +	metricsMu.Unlock()
-+
+ 
+-			//C.freeMemorydRanCellUeKpi(result)
 +	//C.freeMemorydRanCellUeKpi(result)
 +	return true
 +}
-+
+ 
+-		}
 +func (c Control) getRouteReadyNodes() map[string]bool {
 +	ready := make(map[string]bool)
 +	response, err := http.Get("http://service-ricplt-submgr-http.ricplt:8080/ric/v1/get_all_e2nodes")
@@ -422,7 +620,7 @@ index 92b2098..60b5c53 100644
 +		xapp.Logger.Error("SubMgr returned %s while reading route-ready E2 nodes", response.Status)
 +		return ready
 +	}
-+
+ 
 +	var nodeNames []string
 +	if err = json.NewDecoder(response.Body).Decode(&nodeNames); err != nil {
 +		xapp.Logger.Error("Unable to decode route-ready E2 nodes from SubMgr: %v", err)
@@ -453,21 +651,10 @@ index 92b2098..60b5c53 100644
 -			c.sendSubscription(nb.InventoryName)
 -			xapp.Logger.Info("After send subscription request to %v", nb.InventoryName)
 -		}
--
--	}
--
--	fmt.Println("len of ranUeKpi= ", len(ranUeKpi))
--	fmt.Println("ranUeKpi map = ", ranUeKpi)
--
--	fmt.Println("len of ranCellKpi= ", len(ranCellKpi))
--	fmt.Println("ranCellKpi map = ", ranCellKpi)
--
--	fmt.Println("len of Glob_cell_Plmn= ", len(Glob_cell_Plmn))
--	fmt.Println("Glob_cell_Plmn map = ", Glob_cell_Plmn)
--
 +			routeReady := c.getRouteReadyNodes()
 +			connected := make(map[string]bool)
-+
+ 
+-	}
 +			for _, nb := range c.getnbList() {
 +				if nb.ConnectionStatus != 1 {
 +					continue
@@ -483,14 +670,18 @@ index 92b2098..60b5c53 100644
 +				if alreadySubscribed {
 +					continue
 +				}
-+
+ 
+-	fmt.Println("len of ranUeKpi= ", len(ranUeKpi))
+-	fmt.Println("ranUeKpi map = ", ranUeKpi)
 +				if c.initializeNode(nb) && c.sendSubscription(nb.InventoryName) {
 +					subscriptionMu.Lock()
 +					subscribed[nb.InventoryName] = true
 +					subscriptionMu.Unlock()
 +				}
 +			}
-+
+ 
+-	fmt.Println("len of ranCellKpi= ", len(ranCellKpi))
+-	fmt.Println("ranCellKpi map = ", ranCellKpi)
 +			subscriptionMu.Lock()
 +			for nodeName := range subscribed {
 +				if !connected[nodeName] {
@@ -500,11 +691,13 @@ index 92b2098..60b5c53 100644
 +			}
 +			subscriptionMu.Unlock()
 +		}
-+
+ 
+-	fmt.Println("len of Glob_cell_Plmn= ", len(Glob_cell_Plmn))
+-	fmt.Println("Glob_cell_Plmn map = ", Glob_cell_Plmn)
 +		<-ticker.C
 +	}
 +}
-+
+ 
 +func (c Control) xAppStartCB(d interface{}) {
 +	xapp.Logger.Info("Starting KPI monitor E2-node monitoring")
  	go c.controlLoop()

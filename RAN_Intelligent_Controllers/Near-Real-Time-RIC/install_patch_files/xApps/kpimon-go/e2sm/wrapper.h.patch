@@ -1,0 +1,22 @@
+diff --git a/e2sm/wrapper.h b/e2sm/wrapper.h
+index 94a2057..a5ac656 100644
+--- a/e2sm/wrapper.h
++++ b/e2sm/wrapper.h
+@@ -113,6 +113,8 @@ typedef struct ranCellUeKpi{
+ 
+ ssize_t e2sm_encode_ric_event_trigger_definition(void *buffer, size_t buf_size, size_t event_trigger_count, long *RT_periods);
+ 
++ssize_t e2sm_encode_kpm_event_trigger_format1(void *buffer, size_t buf_size, unsigned long reportingPeriodMs);
++
+ //ssize_t e2sm_encode_ric_action_definition(void *buffer, size_t buf_size, long action_Def_count, long meas_ID, long ric_style_type, long GR_periods, Plm plm, Nrc nRc);
+ //
+ 
+@@ -120,7 +122,7 @@ ranCellUeKpi_t buildRanCellUeKpi(const char *hex_values);
+ 
+ void freeMemorydRanCellUeKpi(ranCellUeKpi_t res);
+ 
+-struct encode_act_Def_result encode_action_Definition(const char *hex_values, int determine);
++struct encode_act_Def_result encode_action_Definition(const char *hex_values, int determine, unsigned long granulPeriod);
+ 
+ size_t e2sm_encode_ric_action_definition_format1_by_name(unsigned char *buf, size_t *buf_size, const char **id_tmp , size_t measIdcount, long ric_style_type, unsigned long granulPeriod, unsigned char  *p, unsigned char *nR);
+ 

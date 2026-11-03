@@ -38,20 +38,53 @@ set -e
 
 # Modified 2026-10-21 (ns-O-RAN L-release port): CLEAN_INSTALL and
 # KPIMON_TIMESTAMP_SIZE8 may be set from the environment; defaults keep NIST's behaviour.
+# Modified 2026-11-03 (ns-O-RAN L-release port): the KPM subscription's reporting
+# period and granularity period (ms) come from KPIMON_REPORTING_PERIOD_MS and
+# KPIMON_GRANULARITY_PERIOD_MS (default 100 each, the ns-3 model's indication
+# period; NIST's kpimon had a fixed 10000 ms) and reach kpimon through the
+# controls section of its xApp descriptor; a deployed kpimon with other values is
+# reinstalled instead of restarted.
 CLEAN_INSTALL="${CLEAN_INSTALL:-false}"
+KPIMON_REPORTING_PERIOD_MS="${KPIMON_REPORTING_PERIOD_MS:-100}"
+KPIMON_GRANULARITY_PERIOD_MS="${KPIMON_GRANULARITY_PERIOD_MS:-100}"
+# E2SM-KPM reportingPeriod and granulPeriod are INTEGER (1..4294967295) ms.
+for KPM_PERIOD_VAR in KPIMON_REPORTING_PERIOD_MS KPIMON_GRANULARITY_PERIOD_MS; do
+    KPM_PERIOD_VALUE="${!KPM_PERIOD_VAR}"
+    if ! [[ "$KPM_PERIOD_VALUE" =~ ^[1-9][0-9]{0,9}$ ]] || [ "$KPM_PERIOD_VALUE" -gt 4294967295 ]; then
+        echo "ERROR: $KPM_PERIOD_VAR=\"$KPM_PERIOD_VALUE\" is not an integer in 1..4294967295 (ms)." >&2
+        exit 1
+    fi
+done
+# The ns3-e2-agent sends P / G records per RIC INDICATION and refuses a subscription
+# needing more than E2_MAX_REPORT_RECORDS (default 20) with RIC SUBSCRIPTION FAILURE.
+# P mod G != 0 is left to the agent to refuse (eventTriggerNotSupported), so that
+# failure path stays testable.
+if [ "$KPIMON_REPORTING_PERIOD_MS" -gt $((20 * KPIMON_GRANULARITY_PERIOD_MS)) ]; then
+    echo "ERROR: KPIMON_REPORTING_PERIOD_MS=$KPIMON_REPORTING_PERIOD_MS exceeds 20 x KPIMON_GRANULARITY_PERIOD_MS=$KPIMON_GRANULARITY_PERIOD_MS: the ns3-e2-agent sends at most E2_MAX_REPORT_RECORDS=20 records per indication and would refuse the subscription." >&2
+    exit 1
+fi
+echo "KPM subscription: reportingPeriod $KPIMON_REPORTING_PERIOD_MS ms, granulPeriod $KPIMON_GRANULARITY_PERIOD_MS ms."
 
 CURRENT_DIR=$(pwd)
 SCRIPT_DIR=$(dirname "$(realpath "$0")")
 PARENT_DIR=$(dirname "$SCRIPT_DIR")
 cd "$PARENT_DIR"
 
+# The deployed descriptor (the appconfig ConfigMap kpimon reads at
+# /opt/ric/config/config-file.json) must carry the requested periods for a restart to apply them.
+KPIMON_DEPLOYED_PERIODS=$(kubectl get configmap -n ricxapp configmap-ricxapp-kpimon-go-appconfig -o jsonpath='{.data.config-file\.json}' 2>/dev/null |
+    jq -r '"\(.controls.reportingPeriodMs) \(.controls.granularityPeriodMs)"' 2>/dev/null || true)
 if [ "$CLEAN_INSTALL" != "true" ] && XAPP_DEPLOYMENT=$(kubectl get deployment -n ricxapp -o name 2>/dev/null | grep -m1 'kpimon-go' || true) && [ -n "$XAPP_DEPLOYMENT" ]; then
-    echo "Restarting KPI Monitor xApp (kpimon-go)..."
-    if kubectl rollout restart -n ricxapp "$XAPP_DEPLOYMENT" && kubectl rollout status -n ricxapp "$XAPP_DEPLOYMENT" --timeout=60s; then
-        echo "Successfully restarted KPI Monitor xApp."
-        exit 0
+    if [ "$KPIMON_DEPLOYED_PERIODS" != "$KPIMON_REPORTING_PERIOD_MS $KPIMON_GRANULARITY_PERIOD_MS" ]; then
+        echo "The deployed KPI Monitor xApp has KPM periods \"${KPIMON_DEPLOYED_PERIODS:-unknown}\" (reporting granularity, ms), not \"$KPIMON_REPORTING_PERIOD_MS $KPIMON_GRANULARITY_PERIOD_MS\"; reinstalling it."
+    else
+        echo "Restarting KPI Monitor xApp (kpimon-go)..."
+        if kubectl rollout restart -n ricxapp "$XAPP_DEPLOYMENT" && kubectl rollout status -n ricxapp "$XAPP_DEPLOYMENT" --timeout=60s; then
+            echo "Successfully restarted KPI Monitor xApp."
+            exit 0
+        fi
+        # Otherwise continue to the full installation process
     fi
-    # Otherwise continue to the full installation process
 fi
 
 # Run a sudo command every minute to ensure script execution without user interaction
@@ -98,6 +131,13 @@ if [ ! -f "e2sm/wrapper.previous.c" ]; then
     cp e2sm/wrapper.previous.c "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/wrapper.previous.c"
 fi
 git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/wrapper.c.patch"
+
+git restore e2sm/wrapper.h
+if [ ! -f "e2sm/wrapper.previous.h" ]; then
+    echo "Backing up e2sm/wrapper.h to e2sm/wrapper.previous.h..."
+    cp e2sm/wrapper.h e2sm/wrapper.previous.h
+fi
+git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/wrapper.h.patch"
 
 echo "Updating E2SM-KPM MatchingCondItem bindings to the KPM v2.03 layout..."
 git restore e2sm/asn1/kpm2_0.asn
@@ -222,9 +262,12 @@ FILE="deploy/config_updated.json"
 sudo rm -rf "$FILE"
 cp deploy/config.json "$FILE"
 # Modify the required fields using jq and overwrite the original file
-jq '.containers[0].image.tag = "latest" |
+jq --argjson reportingPeriodMs "$KPIMON_REPORTING_PERIOD_MS" --argjson granularityPeriodMs "$KPIMON_GRANULARITY_PERIOD_MS" \
+    '.containers[0].image.tag = "latest" |
     .containers[0].image.registry = "127.0.0.1:80" |
-    .containers[0].image.name = "kpimon-go"' "$FILE" >tmp.$$.json && mv tmp.$$.json "$FILE"
+    .containers[0].image.name = "kpimon-go" |
+    .controls.reportingPeriodMs = $reportingPeriodMs |
+    .controls.granularityPeriodMs = $granularityPeriodMs' "$FILE" >tmp.$$.json && mv tmp.$$.json "$FILE"
 
 # Check if docker is accessible from the current user, and if not, repair its permissions
 if [ -z "$FIXED_DOCKER_PERMS" ]; then

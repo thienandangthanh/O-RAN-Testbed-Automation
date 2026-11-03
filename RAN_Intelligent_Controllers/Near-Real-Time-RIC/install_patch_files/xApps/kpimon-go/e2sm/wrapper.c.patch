@@ -1,5 +1,5 @@
 diff --git a/e2sm/wrapper.c b/e2sm/wrapper.c
-index 7704746..cdbf59e 100644
+index 7704746..adeab4b 100644
 --- a/e2sm/wrapper.c
 +++ b/e2sm/wrapper.c
 @@ -9,21 +9,24 @@ static int write_out(const void *buffer, size_t size, void *app_key) {
@@ -32,7 +32,7 @@ index 7704746..cdbf59e 100644
                  char byte[3] = {hex_values[i], hex_values[i + 1], '\0'};
                  hex_buffer[i / 2] = (char)strtol(byte, NULL, 16);
          }
-@@ -37,106 +40,122 @@ ranCellUeKpi_t buildRanCellUeKpi(const char *hex_values){
+@@ -37,106 +40,123 @@ ranCellUeKpi_t buildRanCellUeKpi(const char *hex_values){
          printf("Hex values as a string: %s\n", hex_buffer);
          char **name_format1;
          char **name_format3;
@@ -192,7 +192,8 @@ index 7704746..cdbf59e 100644
 -	int BUFFER_SIZE=10240;
 +// determine
 +// 1 for format1 by id, 2 for format1 by name , 3 for format3 by id, 4 for format3 by name
-+struct encode_act_Def_result encode_action_Definition(const char *hex_values, int determine)
++// granulPeriod: E2SM-KPM granularity period in ms (the xApp config's controls.granularityPeriodMs)
++struct encode_act_Def_result encode_action_Definition(const char *hex_values, int determine, unsigned long granulPeriod)
 +{
 +
 +        encode_act_Def_result_t res = {0};
@@ -217,7 +218,7 @@ index 7704746..cdbf59e 100644
                  char byte[3] = {hex_values[i], hex_values[i + 1], '\0'};
                  hex_buffer[i / 2] = (char)strtol(byte, NULL, 16);
          }
-@@ -149,89 +168,130 @@ struct encode_act_Def_result encode_action_Definition(const char *hex_values, in
+@@ -149,124 +169,174 @@ struct encode_act_Def_result encode_action_Definition(const char *hex_values, in
          // Print the result
          printf("Hex values as a string: %s\n", hex_buffer);
  
@@ -248,13 +249,13 @@ index 7704746..cdbf59e 100644
 +        if (rval.code == RC_OK)
          {
 -                printf( "[INFO] E2SM KPM RAN Function Description decode successfull rval.code = %d \n",rval.code);
+-
+-                //asn_fprint(stdout, &asn_DEF_E2SM_KPM_RANfunction_Description, e2smKpmRanFunctDescrip);
 +                printf("[INFO] E2SM KPM RAN Function Description decode successful rval.code = %d \n", rval.code);
  
--                //asn_fprint(stdout, &asn_DEF_E2SM_KPM_RANfunction_Description, e2smKpmRanFunctDescrip);
+-                for(int i=0; i< e2smKpmRanFunctDescrip->ric_ReportStyle_List->list.count; i++){
 +                // asn_fprint(stdout, &asn_DEF_E2SM_KPM_RANfunction_Description, e2smKpmRanFunctDescrip);
  
--                for(int i=0; i< e2smKpmRanFunctDescrip->ric_ReportStyle_List->list.count; i++){
--
 -                        if(e2smKpmRanFunctDescrip->ric_ReportStyle_List->list.array[i]->ric_ActionFormat_Type==1){
 -                                sz1=e2smKpmRanFunctDescrip->ric_ReportStyle_List->list.array[i]->measInfo_Action_List.list.count;
 -                                id_format1=(long *)calloc(sz1,sizeof(long));
@@ -397,8 +398,8 @@ index 7704746..cdbf59e 100644
          unsigned char bufFormat3[BUFFER_SIZE];
          size_t buf_sizeFormat3 = BUFFER_SIZE;
  
-@@ -239,34 +299,44 @@ struct encode_act_Def_result encode_action_Definition(const char *hex_values, in
-         unsigned long granulPeriod = 10000;
+         long ricStyleTypeFormat3 = 3;
+-        unsigned long granulPeriod = 10000;
  
          int encodedLengthFormat3ByName = e2sm_encode_ric_action_definition_format3_by_name(&bufFormat3[0], &buf_sizeFormat3, name_format3, sz3, ricStyleTypeFormat3, granulPeriod);
 -        printf("length of buff= %ld \n",strlen(bufFormat3));
@@ -648,13 +649,13 @@ index 7704746..cdbf59e 100644
 -        PLM->buf=(uint8_t *)calloc(3,sizeof(uint8_t));
 -        memcpy(PLM->buf,p, 3);
 -        PLM->size=3;
+-
 +        NRCellIdentity_t *NRC = (NRCellIdentity_t *)calloc(1, sizeof(NRCellIdentity_t));
 +        NRC->buf = (uint8_t *)calloc(5, sizeof(uint8_t));
 +        memcpy(NRC->buf, nR, 5);
 +        NRC->size = 5;
 +        NRC->bits_unused = 4;
  
--
 -        NRCellIdentity_t *NRC=(NRCellIdentity_t *)calloc(1,sizeof(NRCellIdentity_t));
 -        NRC->buf=(uint8_t *)calloc(5,sizeof(uint8_t));
 -        memcpy(NRC->buf,nR, 5);
@@ -854,18 +855,18 @@ index 7704746..cdbf59e 100644
 -        memcpy(PLM->buf,p, 3);
 -        PLM->size=3;
 -
+-
+-        NRCellIdentity_t *NRC=(NRCellIdentity_t *)calloc(1,sizeof(NRCellIdentity_t));
+-        NRC->buf=(uint8_t *)calloc(5,sizeof(uint8_t));
+-        memcpy(NRC->buf,nR, 5);
+-        NRC->size=5;
+-        NRC->bits_unused=4;
 +        NRCellIdentity_t *NRC = (NRCellIdentity_t *)calloc(1, sizeof(NRCellIdentity_t));
 +        NRC->buf = (uint8_t *)calloc(5, sizeof(uint8_t));
 +        memcpy(NRC->buf, nR, 5);
 +        NRC->size = 5;
 +        NRC->bits_unused = 4;
  
--        NRCellIdentity_t *NRC=(NRCellIdentity_t *)calloc(1,sizeof(NRCellIdentity_t));
--        NRC->buf=(uint8_t *)calloc(5,sizeof(uint8_t));
--        memcpy(NRC->buf,nR, 5);
--        NRC->size=5;
--        NRC->bits_unused=4;
--
 -        nrCGIs->pLMNIdentity=*PLM;
 -        nrCGIs->nRCellIdentity=*NRC;
 +        nrCGIs->pLMNIdentity = *PLM;
@@ -1326,7 +1327,7 @@ index 7704746..cdbf59e 100644
                  fprintf(stderr, "alloc EventTriggerDefinition Format1 failed\n");
                  ASN_STRUCT_FREE(asn_DEF_E2SM_KPM_EventTriggerDefinition, eventTriggerDef);
                  return -1;
-@@ -874,178 +1010,189 @@ ssize_t e2sm_encode_ric_event_trigger_definition(void *buffer, size_t buf_size,
+@@ -874,178 +1010,230 @@ ssize_t e2sm_encode_ric_event_trigger_definition(void *buffer, size_t buf_size,
          // }
  
          asn_enc_rval_t encode_result;
@@ -1349,8 +1350,48 @@ index 7704746..cdbf59e 100644
 +                return encode_result.encoded;
          }
  }
++// E2SM-KPM-EventTriggerDefinition Format 1 (periodic report) with reportingPeriod
++// in ms, APER-encoded into buffer. Returns the encoded length, or -1 if the value
++// is out of range (1..4294967295), the encoding fails or buffer is too small.
++ssize_t e2sm_encode_kpm_event_trigger_format1(void *buffer, size_t buf_size, unsigned long reportingPeriodMs)
++{
++        E2SM_KPM_EventTriggerDefinition_t *eventTriggerDef = (E2SM_KPM_EventTriggerDefinition_t *)calloc(1, sizeof(E2SM_KPM_EventTriggerDefinition_t));
++        if (!eventTriggerDef)
++        {
++                fprintf(stderr, "Alloc EventTriggerDefinition failed\n");
++                return -1;
++        }
  
--
++        E2SM_KPM_EventTriggerDefinition_Format1_t *innerDef = (E2SM_KPM_EventTriggerDefinition_Format1_t *)calloc(1, sizeof(E2SM_KPM_EventTriggerDefinition_Format1_t));
++        if (!innerDef)
++        {
++                fprintf(stderr, "alloc EventTriggerDefinition Format1 failed\n");
++                ASN_STRUCT_FREE(asn_DEF_E2SM_KPM_EventTriggerDefinition, eventTriggerDef);
++                return -1;
++        }
++
++        eventTriggerDef->eventDefinition_formats.present = E2SM_KPM_EventTriggerDefinition__eventDefinition_formats_PR_eventDefinition_Format1;
++        eventTriggerDef->eventDefinition_formats.choice.eventDefinition_Format1 = innerDef;
++        innerDef->reportingPeriod = reportingPeriodMs;
++
++        char errbuf[256];
++        size_t errlen = sizeof(errbuf);
++        if (asn_check_constraints(&asn_DEF_E2SM_KPM_EventTriggerDefinition, eventTriggerDef, errbuf, &errlen))
++        {
++                fprintf(stderr, "[kpimon-go] EventTriggerDefinition constraint failed: %s\n", errbuf);
++                ASN_STRUCT_FREE(asn_DEF_E2SM_KPM_EventTriggerDefinition, eventTriggerDef);
++                return -1;
++        }
++        asn_enc_rval_t encode_result = asn_encode_to_buffer(0, ATS_ALIGNED_BASIC_PER, &asn_DEF_E2SM_KPM_EventTriggerDefinition, eventTriggerDef, buffer, buf_size);
++        ASN_STRUCT_FREE(asn_DEF_E2SM_KPM_EventTriggerDefinition, eventTriggerDef);
++        if (encode_result.encoded < 0 || (size_t)encode_result.encoded > buf_size)
++        {
++                fprintf(stderr, "[kpimon-go] Cannot encode EventTriggerDefinition (%zd octets, buffer %zu)\n", encode_result.encoded, buf_size);
++                return -1;
++        }
++        return encode_result.encoded;
++}
+ 
  /*
  ssize_t e2sm_encode_ric_action_definition(void *buffer, size_t buf_size, long action_Def_count, long meas_ID, long ric_style_type, long GR_periods, Plm plm, Nrc nRc) {
 -	E2SM_KPM_ActionDefinition_t *actionDef = (E2SM_KPM_ActionDefinition_t *)calloc(1, sizeof(E2SM_KPM_ActionDefinition_t));
@@ -1458,19 +1499,7 @@ index 7704746..cdbf59e 100644
      memcpy(nRCs->buf, nRc.nRcs, nRcSize);
 -    nRCs->size = nRcSize; 
 +    nRCs->size = nRcSize;
-+
  
-+        MeasurementInfoList_t *infoList = &actionDefFor1->measInfoList;
-+
-+        int index = 0;
-+        while(index < action_Def_count) {
-+                MeasurementInfoItem_t *infoItem = (MeasurementInfoItem_t *)calloc(1, sizeof(MeasurementInfoItem_t));
-+                // if(!infoItem) {
-+                // 	fprintf(stderr, "alloc Measurement Info Item failed\n");
-+                //     ASN_STRUCT_FREE(asn_DEF_E2SM_KPM_ActionDefinition, actionDef);
-+                // return -1;
-+                // }
-+                assert(infoItem != 0);
  
 -	MeasurementInfoList_t *infoList = &actionDefFor1->measInfoList;
 -	
@@ -1483,21 +1512,33 @@ index 7704746..cdbf59e 100644
 -		// return -1;
 -		// }
 -		assert(infoItem != 0);
++        MeasurementInfoList_t *infoList = &actionDefFor1->measInfoList;
++
++        int index = 0;
++        while(index < action_Def_count) {
++                MeasurementInfoItem_t *infoItem = (MeasurementInfoItem_t *)calloc(1, sizeof(MeasurementInfoItem_t));
++                // if(!infoItem) {
++                // 	fprintf(stderr, "alloc Measurement Info Item failed\n");
++                //     ASN_STRUCT_FREE(asn_DEF_E2SM_KPM_ActionDefinition, actionDef);
++                // return -1;
++                // }
++                assert(infoItem != 0);
  
 -	
 -		MeasurementType_t *measureType = &infoItem->measType;
-+                MeasurementType_t *measureType = &infoItem->measType;
  
 -		measureType->present = MeasurementType_PR_measID;
 -		measureType->choice.measID = meas_ID;
++                MeasurementType_t *measureType = &infoItem->measType;
+ 
 +                measureType->present = MeasurementType_PR_measID;
 +                measureType->choice.measID = meas_ID;
  
- 
 -		LabelInfoList_t *lableList = &infoItem->labelInfoList;
-+                LabelInfoList_t *lableList = &infoItem->labelInfoList;
  
 -		ASN_SEQUENCE_ADD(&infoList->list, infoItem);
++                LabelInfoList_t *lableList = &infoItem->labelInfoList;
++
 +                ASN_SEQUENCE_ADD(&infoList->list, infoItem);
          index++;
 -	}
