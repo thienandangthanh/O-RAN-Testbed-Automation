@@ -268,6 +268,24 @@ jq --argjson reportingPeriodMs "$KPIMON_REPORTING_PERIOD_MS" --argjson granulari
     .containers[0].image.name = "kpimon-go" |
     .controls.reportingPeriodMs = $reportingPeriodMs |
     .controls.granularityPeriodMs = $granularityPeriodMs' "$FILE" >tmp.$$.json && mv tmp.$$.json "$FILE"
+# The onboarder validates the descriptor's controls section against the schema it is given
+# (xapp_onboarder onboard.py: schema["properties"]["controls"] = schema file). kpimon's
+# deploy/schema.json describes an "rmr" object that kpimon keeps at the top level, so the
+# controls section is described by deploy/schema_updated.json: both periods required,
+# E2SM-KPM INTEGER (1..4294967295) ms.
+SCHEMA_FILE="deploy/schema_updated.json"
+sudo rm -rf "$SCHEMA_FILE"
+jq -n '{
+    "$schema": "http://json-schema.org/draft-07/schema",
+    "type": "object",
+    "title": "kpimon-go controls",
+    "description": "KPM subscription periods: Event Trigger Format 1 reportingPeriod and the action definitions granulPeriod, in ms (E2SM-KPM v03.00).",
+    "required": ["reportingPeriodMs", "granularityPeriodMs"],
+    "properties": {
+        "reportingPeriodMs": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "granularityPeriodMs": {"type": "integer", "minimum": 1, "maximum": 4294967295}
+    }
+}' >"$SCHEMA_FILE"
 
 # Check if docker is accessible from the current user, and if not, repair its permissions
 if [ -z "$FIXED_DOCKER_PERMS" ]; then
@@ -307,7 +325,7 @@ else
 fi
 
 echo "Onboarding the KPI Monitor xApp (kpimon-go)..."
-OUTPUT=$(sudo dms_cli onboard ./deploy/config_updated.json ./deploy/schema.json)
+OUTPUT=$(sudo dms_cli onboard ./deploy/config_updated.json ./deploy/schema_updated.json)
 echo $OUTPUT
 if echo "$OUTPUT" | grep -q '"status": "Created"'; then
     echo "Onboarding successful: status is 'Created'."
