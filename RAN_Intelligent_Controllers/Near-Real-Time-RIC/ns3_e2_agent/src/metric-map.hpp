@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -46,6 +47,15 @@ struct MetricMap {
   std::string sha256;              // of the file bytes
   std::vector<MetricRow> cell;     // list "cell" for the selected kind, by order
   std::vector<MetricRow> ue;       // list "ue" for the selected kind, by order
+};
+
+// The measurement records of one IPC sample, built once per sample: the cell
+// list records and, per UE (ascending, distinct IMSI), the UE list records.
+struct SampleRecords {
+  int64_t seq = -1;
+  int64_t simTimeNs = 0;
+  std::vector<MeasValue> cell;
+  std::vector<std::pair<uint64_t, std::vector<MeasValue>>> ues;
 };
 
 // Loads the rows of `kind` from `path`. Returns false and sets `err` on any

@@ -14,6 +14,9 @@
 # Options: --image (default NS3_E2_AGENT_IMAGE from run/image.env),
 #          --env KEY=VAL (extra agent env, repeatable; e.g. E2_SCTP_SRC_PORT=36422),
 #          --plmn DIGITS (default 00101; also sets E2_PLMN).
+# Env: E2_INDICATION_PERIOD_MS, when set, is passed to every agent: it must equal
+#      ns-3's --indicationPeriodicity (in ms) or the agent rejects ns-3's hello;
+#      unset, the agent's default (100 ms) applies.
 set -euo pipefail
 echo "# Script: $(realpath "$0") $*"
 
@@ -33,6 +36,11 @@ while [ $# -gt 0 ]; do
 	esac
 done
 [ -n "$NODES" ] || die "--nodes is required (e.g. --nodes gnb:2)"
+PERIOD_ENV=()
+if [ -n "${E2_INDICATION_PERIOD_MS+x}" ]; then
+	PERIOD_ENV=(-e "E2_INDICATION_PERIOD_MS=$E2_INDICATION_PERIOD_MS")
+	echo "E2_INDICATION_PERIOD_MS=$E2_INDICATION_PERIOD_MS passed to the agents"
+fi
 if [ -z "$IMAGE" ] && [ -f "$RUN_DIR/image.env" ]; then
 	IMAGE=$(sed -n 's/^NS3_E2_AGENT_IMAGE=//p' "$RUN_DIR/image.env")
 fi
@@ -82,7 +90,7 @@ for p in "${PAIRS[@]}"; do
 		-p "127.0.0.1:$port:$port" \
 		-e "E2_NODE_ID=$id" -e "E2_NODE_KIND=$kind" -e "E2_PLMN=$PLMN" \
 		-e "E2_TERM_ADDR=$E2TERM_IP" -e "E2_TERM_PORT=$E2TERM_PORT" -e "E2_IPC_PORT=$port" \
-		"${EXTRA_ENV[@]}" "$IMAGE" </dev/null)
+		"${PERIOD_ENV[@]}" "${EXTRA_ENV[@]}" "$IMAGE" </dev/null)
 	# Inventory name e2term will build (BuildRunName.h translatePlmnId + gNB-ID hex, 29-bit ID = node id).
 	ran=$(python3 -I -c '
 import sys

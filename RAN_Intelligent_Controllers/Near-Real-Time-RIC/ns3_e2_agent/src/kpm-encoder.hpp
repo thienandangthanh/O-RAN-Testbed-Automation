@@ -40,9 +40,11 @@ bool encode_indication_header(const std::array<uint8_t, 8> &ts, const std::strin
                               const std::string &senderType, const std::string &vendorName, Bytes &out,
                               std::string &err);
 
-// IndicationMessage format 1: one measData item whose records follow the cell
-// list order; measInfoList carries each measID with noLabel; no incompleteFlag.
-bool encode_format1(const std::vector<MeasValue> &records, const std::vector<MetricRow> &rows,
+// IndicationMessage format 1: one measData item per granularity period of the
+// reporting period (E2SM-KPM v03.00 8.2.1.4.1), oldest first; each item's
+// records follow the cell list order; measInfoList carries each measID with
+// noLabel; no incompleteFlag.
+bool encode_format1(const std::vector<std::vector<MeasValue>> &periods, const std::vector<MetricRow> &rows,
                     unsigned long granulPeriodMs, Bytes &out, std::string &err);
 
 // Fixed GUAMI used in every gNB-UEID (PLMN = the node's PLMN).
@@ -53,12 +55,14 @@ struct Guami {
   uint8_t amfPointer = 1;    // BIT STRING (SIZE(6))
 };
 
-// IndicationMessage format 2, metric-major: records[m * nUe + u] = perUe[u][m].
+// IndicationMessage format 2: one measData item per granularity period, oldest
+// first, each metric-major: item t has records[m * nUe + u] = periods[t][u][m].
 // measCondUEidList has one item per UE-list metric (measID, noLabel and, when
-// withUeIds, one gNB-UEID per UE with amf-UE-NGAP-ID = imsi).
-bool encode_format2(const std::vector<std::vector<MeasValue>> &perUe, const std::vector<uint64_t> &imsis,
-                    const std::vector<MetricRow> &rows, const Guami &guami, bool withUeIds,
-                    unsigned long granulPeriodMs, Bytes &out, std::string &err);
+// withUeIds, one gNB-UEID per UE with amf-UE-NGAP-ID = imsi); the UE list is
+// the same for every period.
+bool encode_format2(const std::vector<std::vector<std::vector<MeasValue>>> &periods,
+                    const std::vector<uint64_t> &imsis, const std::vector<MetricRow> &rows, const Guami &guami,
+                    bool withUeIds, unsigned long granulPeriodMs, Bytes &out, std::string &err);
 
 }  // namespace agent
 

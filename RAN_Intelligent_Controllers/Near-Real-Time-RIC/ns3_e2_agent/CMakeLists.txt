@@ -40,6 +40,9 @@ add_library(ns3_e2_agent_core STATIC
   src/kpm-indication-message.cpp
   src/e2ap-builders.cpp
   src/e2ap-inbound.cpp
+  src/kpm-subscription-admission.cpp
+  src/sample-forwarder.cpp
+  src/subscription-table.cpp
   src/rc-control.cpp
   src/agent-stats.cpp)
 add_dependencies(ns3_e2_agent_core asn1_objects)
@@ -48,10 +51,8 @@ target_include_directories(ns3_e2_agent_core PUBLIC rc_codec)
 
 add_executable(ns3-e2-agent
   src/main.cpp
-  src/subscription-table.cpp
   src/sctp-association.cpp
   src/ipc-server.cpp
-  src/sample-forwarder.cpp
   src/e2-session.cpp)
 target_link_libraries(ns3-e2-agent ns3_e2_agent_core)
 
@@ -61,6 +62,11 @@ target_link_libraries(codec-probe ns3_e2_agent_core)
 add_executable(rc-control-test tests/rc-control-test.cpp)
 target_link_libraries(rc-control-test ns3_e2_agent_core)
 
-install(TARGETS ns3-e2-agent codec-probe rc-control-test DESTINATION bin)
+add_executable(kpm-report-period-test tests/kpm-report-period-test.cpp)
+target_link_libraries(kpm-report-period-test ns3_e2_agent_core)
+
+install(TARGETS ns3-e2-agent codec-probe rc-control-test kpm-report-period-test DESTINATION bin)
 install(TARGETS rc_codec DESTINATION lib)
-install(FILES tests/fixtures/rc-control-requests.hex DESTINATION share/ns3-e2-agent)
+install(FILES tests/fixtures/rc-control-requests.hex tests/fixtures/ipc-samples-gnb2-seq26-35.jsonl
+              tests/fixtures/kpm-tt-golden-gnb2-seq26-35.txt tests/fixtures/kpimon-subscription-octets.txt
+        DESTINATION share/ns3-e2-agent)

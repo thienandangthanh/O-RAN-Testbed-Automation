@@ -10,7 +10,10 @@
 #     `docker run --init`), so the Docker restart policy sees its exits;
 #     NIST's image idles on CMD sleep and runs kpm_sim through docker exec.
 #   - the metric map is copied to /etc/ns3-e2-agent/;
-#   - ric-app-rc's generated E2SM-RC code (pinned commit) builds librc_codec.so.
+#   - ric-app-rc's generated E2SM-RC code (pinned commit) builds librc_codec.so;
+#   - the agent's copy of NIST's asn1c gets asn1c_patches/ (an X.691 fix of the
+#     APER encoder for extension enumeration values, e.g. CauseRICrequest
+#     eventTriggerNotSupported); libe2sim stays built from the unpatched tree.
 #
 # Build (from e2-interface/e2sim, see install_scripts/install_ns3_e2_agent.sh):
 #   docker build --build-arg CONTAINER_PULL_REGISTRY=nexus3.o-ran-sc.org:10002 \
@@ -50,6 +53,7 @@ RUN git clone -q https://github.com/o-ran-sc/ric-app-rc.git /playpen/rc && git -
 # E2AP + E2SM-KPM v3 asn1c (and librc_codec.so for E2SM-RC).
 COPY e2sm_examples/ns3_e2_agent/ /playpen/agent/
 COPY asn1c/ /playpen/agent/asn1c/
+RUN cd /playpen/agent/asn1c && for p in ../asn1c_patches/*.patch; do git apply "$p" || exit 1; done
 RUN cd /playpen/agent && rm -rf .build && mkdir .build && cd .build && cmake -DRC_E2SM_DIR=/playpen/rc/e2sm .. \
 	&& make -j"$(nproc)" install && ldconfig
 RUN mkdir -p /etc/ns3-e2-agent && cp /playpen/agent/schema/metric-map.v1.json /etc/ns3-e2-agent/ \

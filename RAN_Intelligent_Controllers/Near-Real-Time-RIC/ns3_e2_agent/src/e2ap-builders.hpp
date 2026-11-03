@@ -4,6 +4,7 @@
 #ifndef NS3_E2_AGENT_E2AP_BUILDERS_HPP
 #define NS3_E2_AGENT_E2AP_BUILDERS_HPP
 
+#include <utility>
 #include <vector>
 
 #include "agent-config.hpp"
@@ -16,10 +17,19 @@ namespace agent {
 // gNB agents also carry the 5-byte cell key in e2nodeComponentRequestPart (N5).
 bool build_setup_request(const Config &cfg, const Bytes &ranFuncDef, Bytes &out, std::string &err);
 
-// RICsubscriptionResponse admitting every action; the generator's hard-coded
-// RANfunctionID 147 is replaced with the request's function ID.
+// RICsubscriptionResponse: the generator's admitted list (its hard-coded
+// RANfunctionID 147 replaced with the request's function ID) plus, when
+// notAdmitted is not empty, an agent-built RICactions-NotAdmitted list
+// (E2AP v03.00 9.1.1.2) of (action ID, ricRequest cause) items.
 bool build_subscription_response(long requestorId, long instanceId, long ranFuncId,
-                                 const std::vector<long> &actionIds, Bytes &out, std::string &err);
+                                 const std::vector<long> &admitted,
+                                 const std::vector<std::pair<long, long>> &notAdmitted, Bytes &out,
+                                 std::string &err);
+
+// RICsubscriptionFailure (agent-owned builder; E2AP v03.00 9.1.1.3) with a
+// ricRequest cause (CauseRICrequest value).
+bool build_subscription_failure(long requestorId, long instanceId, long ranFuncId, long ricRequestCause, Bytes &out,
+                                std::string &err);
 
 // RICsubscriptionDeleteResponse (agent-owned builder).
 bool build_subscription_delete_response(long requestorId, long instanceId, long ranFuncId, Bytes &out,

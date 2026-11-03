@@ -82,7 +82,7 @@ int main(int argc, char **argv) {
   f1.push_back(N()); f1.push_back(N()); f1.push_back(N());
   while (f1.size() < map.cell.size()) f1.push_back(I(f1.size()));
   Bytes m1;
-  if (!encode_format1(f1, map.cell, 100, m1, err)) return fail("format1", err), 1;
+  if (!encode_format1({f1}, map.cell, 100, m1, err)) return fail("format1", err), 1;
 
   // (d) format 2, 3 metrics x 2 UEs, with and without UE IDs.
   std::vector<MetricRow> three(map.ue.begin(), map.ue.begin() + 3);
@@ -91,8 +91,8 @@ int main(int argc, char **argv) {
   Guami g;
   g.plmn = {0x00, 0xF1, 0x10};
   Bytes m2a, m2b, m2full;
-  if (!encode_format2(ues2, imsi2, three, g, true, 100, m2a, err)) return fail("format2 ueid", err), 1;
-  if (!encode_format2(ues2, imsi2, three, g, false, 100, m2b, err)) return fail("format2 no ueid", err), 1;
+  if (!encode_format2({ues2}, imsi2, three, g, true, 100, m2a, err)) return fail("format2 ueid", err), 1;
+  if (!encode_format2({ues2}, imsi2, three, g, false, 100, m2b, err)) return fail("format2 no ueid", err), 1;
 
   // (e) format 2 over the full 58-entry UE list x 4 UEs (realistic size).
   std::vector<std::vector<MeasValue>> ues4;
@@ -103,7 +103,7 @@ int main(int argc, char **argv) {
       r.push_back(map.ue[k].type == RecordType::Integer ? I(1000 * u + k) : R(u + k / 7.0 - 3.25));
     ues4.push_back(r);
   }
-  if (!encode_format2(ues4, imsi4, map.ue, g, true, 100, m2full, err)) return fail("format2 full", err), 1;
+  if (!encode_format2({ues4}, imsi4, map.ue, g, true, 100, m2full, err)) return fail("format2 full", err), 1;
 
   std::ofstream lines(dir + "/ind-lines.txt");
   lines << "f1 " << to_hex(hdr) << " " << to_hex(m1) << "\n";

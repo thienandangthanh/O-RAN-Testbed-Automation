@@ -21,14 +21,19 @@ struct Stats {
   uint64_t helloAccepted = 0, helloRejected = 0, byeRx = 0, unknownType = 0;
   uint64_t samplesBeforeHello = 0, samplesBadNode = 0;
   // samples
-  uint64_t samplesIn = 0, samplesForwarded = 0;
+  uint64_t samplesIn = 0, samplesForwarded = 0;  // forwarded = sent in a report
   uint64_t droppedE2Down = 0, droppedNoSub = 0, droppedSendBusy = 0, droppedEncode = 0;
-  uint64_t uesDroppedOversize = 0, uesDroppedBadImsi = 0, chunkSplits = 0;
+  uint64_t reportGaps = 0;           // reporting periods restarted on a seq gap
+  uint64_t samplesGapDiscarded = 0;  // samples of those periods
+  uint64_t samplesUnreported = 0;    // samples of periods ended by bye, disconnect or subscription delete
+  uint64_t samplesReportFailed = 0;  // samples of reports not encoded or not sent
+  uint64_t uesDroppedOversize = 0, uesDroppedBadImsi = 0, uesDroppedDuplicateImsi = 0, chunkSplits = 0;
   ConvCounters conv;
   // E2 side
   uint64_t connectAttempts = 0, connectFailures = 0, setups = 0;
   uint64_t indTx = 0, indTxCell = 0, indTxUe = 0;
   uint64_t rxPdu = 0, rxPduUndecodable = 0, subsAdded = 0, subsReplaced = 0, subsDeleted = 0;
+  uint64_t subsRefused = 0, actionsNotAdmitted = 0;  // RIC SUBSCRIPTION FAILURE sent; actions not admitted
   uint64_t subsOtherFunc = 0, serviceQueries = 0, errorIndications = 0, otherPdus = 0, ctrlSendFailed = 0;
   // RC control path (rc-control.hpp)
   uint64_t ctlRx = 0, ctlRejFunc = 0, ctlRejDecode = 0, ctlRejAction = 0, ctlRejIpcDown = 0;

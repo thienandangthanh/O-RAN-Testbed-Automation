@@ -75,14 +75,14 @@ void forward_sample(const json &m, SampleEncoder &enc, E2Session &e2, IpcState &
     stats().droppedNoSub++;
     return;
   }
-  EncodedSample es;
+  SampleRecords rec;
   std::string err;
-  if (!enc.encode(m, st.hello, es, err)) {
+  if (!enc.build(m, rec, err)) {
     stats().droppedEncode++;
-    ALOG_E("sample seq %lld not encoded: %s", (long long)es.seq, err.c_str());
+    ALOG_E("sample not encoded: %s", err.c_str());
     return;
   }
-  if (e2.forward(es)) stats().samplesForwarded++;
+  e2.forward(rec, enc, st.hello);
 }
 
 void handle_line(const std::string &line, const Config &cfg, SampleEncoder &enc, E2Session &e2, IpcServer &ipc,
@@ -103,6 +103,7 @@ void handle_line(const std::string &line, const Config &cfg, SampleEncoder &enc,
       return;
     }
     stats().helloAccepted++;
+    e2.end_reports();  // a new ns-3 run: no reporting period spans two runs
     st.helloSeen = true;
     st.lockstep = m.value("pacing", "free") == "lockstep";
     st.readySent = false;
@@ -125,6 +126,7 @@ void handle_line(const std::string &line, const Config &cfg, SampleEncoder &enc,
     rc.on_control_ack(m);
   } else if (type == "bye") {
     stats().byeRx++;
+    e2.end_reports();  // the reporting period in progress never ends: not reported
     ALOG_I("ipc: bye %s", line.c_str());
     rc.fail_all_pending("ns-3 sent bye");
   } else {
@@ -214,6 +216,7 @@ int main() {
       for (const std::string &l : lines) handle_line(l, cfg, enc, e2, ipc, ist, rc);
       if (ipc.client_fd() < 0) {
         ist.helloSeen = false;
+        e2.end_reports();
         rc.fail_all_pending("ns-3 IPC connection closed");
       }
     }

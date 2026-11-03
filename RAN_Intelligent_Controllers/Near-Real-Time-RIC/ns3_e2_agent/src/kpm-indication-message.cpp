@@ -89,20 +89,27 @@ bool encode_message(E2SM_KPM_IndicationMessage_t *m, Bytes &out, std::string &er
 
 }  // namespace
 
-bool encode_format1(const std::vector<MeasValue> &records, const std::vector<MetricRow> &rows,
+bool encode_format1(const std::vector<std::vector<MeasValue>> &periods, const std::vector<MetricRow> &rows,
                     unsigned long granulPeriodMs, Bytes &out, std::string &err) {
-  if (records.size() != rows.size() || rows.empty()) {
-    err = "format1: record count != cell list length";
+  if (periods.empty() || rows.empty()) {
+    err = "format1: needs at least one period and one metric";
     return false;
   }
+  for (const auto &records : periods)
+    if (records.size() != rows.size()) {
+      err = "format1: record count != cell list length";
+      return false;
+    }
   auto *m = (E2SM_KPM_IndicationMessage_t *)calloc(1, sizeof(E2SM_KPM_IndicationMessage_t));
   auto *f1 = (E2SM_KPM_IndicationMessage_Format1_t *)calloc(1, sizeof(E2SM_KPM_IndicationMessage_Format1_t));
   m->indicationMessage_formats.present = E2SM_KPM_IndicationMessage__indicationMessage_formats_PR_indicationMessage_Format1;
   m->indicationMessage_formats.choice.indicationMessage_Format1 = f1;
 
-  auto *item = (MeasurementDataItem_t *)calloc(1, sizeof(MeasurementDataItem_t));
-  for (const MeasValue &v : records) ASN_SEQUENCE_ADD(&item->measRecord.list, record(v));
-  ASN_SEQUENCE_ADD(&f1->measData.list, item);  // incompleteFlag stays absent
+  for (const auto &records : periods) {
+    auto *item = (MeasurementDataItem_t *)calloc(1, sizeof(MeasurementDataItem_t));
+    for (const MeasValue &v : records) ASN_SEQUENCE_ADD(&item->measRecord.list, record(v));
+    ASN_SEQUENCE_ADD(&f1->measData.list, item);  // incompleteFlag stays absent
+  }
 
   f1->measInfoList = (MeasurementInfoList *)calloc(1, sizeof(MeasurementInfoList_t));
   for (const MetricRow &r : rows) {
@@ -120,28 +127,36 @@ bool encode_format1(const std::vector<MeasValue> &records, const std::vector<Met
   return encode_message(m, out, err);
 }
 
-bool encode_format2(const std::vector<std::vector<MeasValue>> &perUe, const std::vector<uint64_t> &imsis,
-                    const std::vector<MetricRow> &rows, const Guami &guami, bool withUeIds,
-                    unsigned long granulPeriodMs, Bytes &out, std::string &err) {
-  if (perUe.empty() || perUe.size() != imsis.size() || rows.empty()) {
-    err = "format2: needs at least one UE and one metric";
+bool encode_format2(const std::vector<std::vector<std::vector<MeasValue>>> &periods,
+                    const std::vector<uint64_t> &imsis, const std::vector<MetricRow> &rows, const Guami &guami,
+                    bool withUeIds, unsigned long granulPeriodMs, Bytes &out, std::string &err) {
+  if (periods.empty() || imsis.empty() || rows.empty()) {
+    err = "format2: needs at least one period, one UE and one metric";
     return false;
   }
-  for (const auto &u : perUe)
-    if (u.size() != rows.size()) {
-      err = "format2: UE record count != UE list length";
+  for (const auto &perUe : periods) {
+    if (perUe.size() != imsis.size()) {
+      err = "format2: UE count differs between periods";
       return false;
     }
+    for (const auto &u : perUe)
+      if (u.size() != rows.size()) {
+        err = "format2: UE record count != UE list length";
+        return false;
+      }
+  }
   auto *m = (E2SM_KPM_IndicationMessage_t *)calloc(1, sizeof(E2SM_KPM_IndicationMessage_t));
   auto *f2 = (E2SM_KPM_IndicationMessage_Format2_t *)calloc(1, sizeof(E2SM_KPM_IndicationMessage_Format2_t));
   m->indicationMessage_formats.present = E2SM_KPM_IndicationMessage__indicationMessage_formats_PR_indicationMessage_Format2;
   m->indicationMessage_formats.choice.indicationMessage_Format2 = f2;
 
-  // kpimon reads measData[0] only and indexes record (ue + metric * nUe).
-  auto *item = (MeasurementDataItem_t *)calloc(1, sizeof(MeasurementDataItem_t));
-  for (size_t mi = 0; mi < rows.size(); mi++)
-    for (size_t ui = 0; ui < perUe.size(); ui++) ASN_SEQUENCE_ADD(&item->measRecord.list, record(perUe[ui][mi]));
-  ASN_SEQUENCE_ADD(&f2->measData.list, item);
+  // kpimon indexes the records of an item as (ue + metric * nUe).
+  for (const auto &perUe : periods) {
+    auto *item = (MeasurementDataItem_t *)calloc(1, sizeof(MeasurementDataItem_t));
+    for (size_t mi = 0; mi < rows.size(); mi++)
+      for (size_t ui = 0; ui < perUe.size(); ui++) ASN_SEQUENCE_ADD(&item->measRecord.list, record(perUe[ui][mi]));
+    ASN_SEQUENCE_ADD(&f2->measData.list, item);
+  }
 
   for (const MetricRow &r : rows) {
     auto *c = (MeasurementCondUEidItem_t *)calloc(1, sizeof(MeasurementCondUEidItem_t));

@@ -7,6 +7,7 @@
 #include "agent-log.hpp"
 #include "agent-stats.hpp"
 #include "e2ap-builders.hpp"
+#include "kpm-subscription-admission.hpp"
 
 namespace agent {
 
@@ -120,7 +121,9 @@ void E2Session::handle_pdu(const Bytes &pdu) {
     case InboundPdu::SetupFailure: agent_exit(3, "E2SetupFailure received");
     case InboundPdu::SubscriptionRequest: on_subscription(p); break;
     case InboundPdu::SubscriptionDeleteRequest: {
+      size_t pending = subs_.pending_samples();
       bool removed = subs_.remove(p.requestorId, p.instanceId);
+      stats().samplesUnreported += pending - subs_.pending_samples();
       stats().subsDeleted += removed;
       stats().subs = subs_.size();
       ALOG_I("subscription delete %ld/%ld (%s)", p.requestorId, p.instanceId, removed ? "removed" : "unknown");
@@ -154,22 +157,39 @@ void E2Session::on_subscription(const InboundPdu &p) {
            p.ranFuncId, cfg_.ranFuncId);
     return;
   }
+  // T is the configured indication period, not the hello's: the subscription
+  // usually arrives before ns-3 connects, and the hello must match it anyway.
+  KpmAdmission a = admit_kpm_subscription(p, cfg_.indicationPeriodMs, cfg_.maxReportRecords);
+  Bytes b;
+  std::string err;
+  if (a.refused) {
+    stats().subsRefused++;
+    ALOG_W("subscription %ld/%ld refused, ricRequest cause %ld: %s", p.requestorId, p.instanceId, a.refusalCause,
+           a.reason.c_str());
+    if (build_subscription_failure(p.requestorId, p.instanceId, p.ranFuncId, a.refusalCause, b, err))
+      send_ctrl(b, "RICsubscriptionFailure");
+    else ALOG_E("subscription failure: %s", err.c_str());
+    return;
+  }
   Subscription s;
   s.requestorId = p.requestorId;
   s.instanceId = p.instanceId;
   s.ranFuncId = p.ranFuncId;
-  s.actionIds = p.actionIds;  // option A: admit every action
-  for (size_t i = 0; i < p.actionTypes.size(); i++)
-    if (p.actionTypes[i] != 0) ALOG_W("action %ld has type %ld (not REPORT); admitted, reports only", p.actionIds[i], p.actionTypes[i]);
-  if (!s.actionIds.empty()) s.actionId = *std::min_element(s.actionIds.begin(), s.actionIds.end());
+  s.actionIds = a.admitted;
+  s.actionId = *std::min_element(s.actionIds.begin(), s.actionIds.end());
+  s.samplesPerReport = a.samplesPerReport;
+  size_t pending = subs_.pending_samples();
   bool replaced = subs_.add_or_replace(s);
+  stats().samplesUnreported += pending - subs_.pending_samples();
   (replaced ? stats().subsReplaced : stats().subsAdded)++;
+  stats().actionsNotAdmitted += a.notAdmitted.size();
   stats().subs = subs_.size();
-  ALOG_I("subscription %ld/%ld RAN function %ld: %zu action(s) admitted, indications on action %ld%s", s.requestorId,
-         s.instanceId, s.ranFuncId, s.actionIds.size(), s.actionId, replaced ? " (replaced)" : "");
-  Bytes b;
-  std::string err;
-  if (build_subscription_response(s.requestorId, s.instanceId, s.ranFuncId, s.actionIds, b, err))
+  ALOG_I("subscription %ld/%ld RAN function %ld: reporting period %lu ms = %ld x %ld ms; %zu action(s) admitted, "
+         "%zu not admitted%s%s; indications on action %ld%s",
+         s.requestorId, s.instanceId, s.ranFuncId, a.reportingPeriodMs, s.samplesPerReport, cfg_.indicationPeriodMs,
+         s.actionIds.size(), a.notAdmitted.size(), a.reason.empty() ? "" : ": ", a.reason.c_str(), s.actionId,
+         replaced ? " (replaced)" : "");
+  if (build_subscription_response(s.requestorId, s.instanceId, s.ranFuncId, s.actionIds, a.notAdmitted, b, err))
     send_ctrl(b, "RICsubscriptionResponse");
   else ALOG_E("subscription response: %s", err.c_str());
 }
@@ -186,33 +206,50 @@ void E2Session::send_ctrl(const Bytes &pdu, const char *what) {
   ALOG_I("tx %s (%zu octets)", what, pdu.size());
 }
 
-bool E2Session::forward(const EncodedSample &s) {
+bool E2Session::send_report(Subscription &sub, const EncodedReport &rep) {
   std::string err;
-  for (Subscription &sub : subs_.all()) {
-    auto one = [&](const Bytes &msg, bool cell) {
-      Bytes ind;
-      if (!build_indication(sub.requestorId, sub.instanceId, sub.ranFuncId, sub.actionId, sub.nextSn, s.header, msg,
-                            ind, err)) {
-        stats().droppedEncode++;
-        ALOG_E("indication: %s", err.c_str());
-        return false;
-      }
-      SctpAssociation::SendResult r = sctp_.send(ind, err);
-      if (r == SctpAssociation::SendResult::Lost) agent_exit(2, "association lost sending RICindication: " + err);
-      if (r == SctpAssociation::SendResult::Busy) {
-        stats().droppedSendBusy++;
-        return false;
-      }
-      sub.nextSn = (sub.nextSn + 1) & 0xFFFF;
-      stats().indTx++;
-      (cell ? stats().indTxCell : stats().indTxUe)++;
-      return true;
-    };
-    if (!one(s.cellMsg, true)) return false;
-    for (const Bytes &u : s.ueMsgs)
-      if (!one(u, false)) return false;
-  }
+  auto one = [&](const Bytes &msg, bool cell) {
+    Bytes ind;
+    if (!build_indication(sub.requestorId, sub.instanceId, sub.ranFuncId, sub.actionId, sub.nextSn, rep.header, msg,
+                          ind, err)) {
+      stats().droppedEncode++;
+      ALOG_E("indication: %s", err.c_str());
+      return false;
+    }
+    SctpAssociation::SendResult r = sctp_.send(ind, err);
+    if (r == SctpAssociation::SendResult::Lost) agent_exit(2, "association lost sending RICindication: " + err);
+    if (r == SctpAssociation::SendResult::Busy) {
+      stats().droppedSendBusy++;
+      return false;
+    }
+    sub.nextSn = (sub.nextSn + 1) & 0xFFFF;
+    stats().indTx++;
+    (cell ? stats().indTxCell : stats().indTxUe)++;
+    return true;
+  };
+  if (!one(rep.cellMsg, true)) return false;
+  for (const Bytes &u : rep.ueMsgs)
+    if (!one(u, false)) return false;
   return true;
 }
+
+bool E2Session::forward(const SampleRecords &r, const SampleEncoder &enc, const HelloInfo &hello) {
+  PeriodTally t = subs_.add_sample(r, [&](Subscription &sub, const std::vector<SampleRecords> &samples) {
+    EncodedReport rep;
+    std::string err;
+    if (enc.encode(samples, hello, rep, err)) return send_report(sub, rep);
+    stats().droppedEncode++;
+    ALOG_E("report seq %lld..%lld not encoded: %s", (long long)samples.front().seq, (long long)samples.back().seq,
+           err.c_str());
+    return false;
+  });
+  stats().reportGaps += t.gaps;
+  stats().samplesGapDiscarded += t.gapDiscarded;
+  stats().samplesReportFailed += t.failed;
+  stats().samplesForwarded += t.forwarded;
+  return t.failed == 0;
+}
+
+void E2Session::end_reports() { stats().samplesUnreported += subs_.end_periods(); }
 
 }  // namespace agent

@@ -118,11 +118,14 @@ bool build_setup_request(const Config &cfg, const Bytes &ranFuncDef, Bytes &out,
 }
 
 bool build_subscription_response(long requestorId, long instanceId, long ranFuncId,
-                                 const std::vector<long> &actionIds, Bytes &out, std::string &err) {
+                                 const std::vector<long> &admittedIds,
+                                 const std::vector<std::pair<long, long>> &notAdmitted, Bytes &out,
+                                 std::string &err) {
   E2AP_PDU_t *pdu = new_pdu();
-  std::vector<long> admitted(actionIds);
+  std::vector<long> admitted(admittedIds);
   long none[1] = {0};
-  // reject_size 0: the generator's not-admitted branch corrupts the PDU, so it is never used.
+  // reject_size 0: the generator's not-admitted branch corrupts the PDU, so it is
+  // never used; the not-admitted list is built below instead.
   encoding::generate_e2apv1_subscription_response_success(pdu, admitted.data(), none, (int)admitted.size(), 0,
                                                            requestorId, instanceId);
   bool patched = false;
@@ -132,7 +135,57 @@ bool build_subscription_response(long requestorId, long instanceId, long ranFunc
       list.array[i]->value.choice.RANfunctionID = ranFuncId;  // generator hard-codes 147
       patched = true;
     }
+  if (!notAdmitted.empty()) {
+    // Criticalities per the E2AP v03.01 ASN.1: the list IE reject, each item ignore.
+    auto *ie = (RICsubscriptionResponse_IEs_t *)calloc(1, sizeof(RICsubscriptionResponse_IEs_t));
+    ie->id = ProtocolIE_ID_id_RICactions_NotAdmitted;
+    ie->criticality = Criticality_reject;
+    ie->value.present = RICsubscriptionResponse_IEs__value_PR_RICaction_NotAdmitted_List;
+    for (const auto &na : notAdmitted) {
+      auto *it = (RICaction_NotAdmitted_ItemIEs_t *)calloc(1, sizeof(RICaction_NotAdmitted_ItemIEs_t));
+      it->id = ProtocolIE_ID_id_RICaction_NotAdmitted_Item;
+      it->criticality = Criticality_ignore;
+      it->value.present = RICaction_NotAdmitted_ItemIEs__value_PR_RICaction_NotAdmitted_Item;
+      it->value.choice.RICaction_NotAdmitted_Item.ricActionID = na.first;
+      it->value.choice.RICaction_NotAdmitted_Item.cause.present = Cause_PR_ricRequest;
+      it->value.choice.RICaction_NotAdmitted_Item.cause.choice.ricRequest = na.second;
+      ASN_SEQUENCE_ADD(&ie->value.choice.RICaction_NotAdmitted_List.list, it);
+    }
+    ASN_SEQUENCE_ADD(&list, ie);
+  }
   return finish(pdu, patched, "RICsubscriptionResponse", out, err);
+}
+
+bool build_subscription_failure(long requestorId, long instanceId, long ranFuncId, long ricRequestCause, Bytes &out,
+                                std::string &err) {
+  E2AP_PDU_t *pdu = new_pdu();
+  pdu->present = E2AP_PDU_PR_unsuccessfulOutcome;
+  auto *uo = (UnsuccessfulOutcome_t *)calloc(1, sizeof(UnsuccessfulOutcome_t));
+  pdu->choice.unsuccessfulOutcome = uo;
+  uo->procedureCode = ProcedureCode_id_RICsubscription;
+  uo->criticality = Criticality_reject;
+  uo->value.present = UnsuccessfulOutcome__value_PR_RICsubscriptionFailure;
+  auto &list = uo->value.choice.RICsubscriptionFailure.protocolIEs.list;
+  // Criticalities per the E2AP v03.01 ASN.1 (RICsubscriptionFailure-IEs): all reject.
+  auto add = [&list](long id) {
+    auto *ie = (RICsubscriptionFailure_IEs_t *)calloc(1, sizeof(RICsubscriptionFailure_IEs_t));
+    ie->id = id;
+    ie->criticality = Criticality_reject;
+    ASN_SEQUENCE_ADD(&list, ie);
+    return ie;
+  };
+  RICsubscriptionFailure_IEs_t *req = add(ProtocolIE_ID_id_RICrequestID);
+  req->value.present = RICsubscriptionFailure_IEs__value_PR_RICrequestID;
+  req->value.choice.RICrequestID.ricRequestorID = requestorId;
+  req->value.choice.RICrequestID.ricInstanceID = instanceId;
+  RICsubscriptionFailure_IEs_t *fn = add(ProtocolIE_ID_id_RANfunctionID);
+  fn->value.present = RICsubscriptionFailure_IEs__value_PR_RANfunctionID;
+  fn->value.choice.RANfunctionID = ranFuncId;
+  RICsubscriptionFailure_IEs_t *ca = add(ProtocolIE_ID_id_Cause);
+  ca->value.present = RICsubscriptionFailure_IEs__value_PR_Cause;
+  ca->value.choice.Cause.present = Cause_PR_ricRequest;
+  ca->value.choice.Cause.choice.ricRequest = ricRequestCause;
+  return finish(pdu, true, "RICsubscriptionFailure", out, err);
 }
 
 bool build_subscription_delete_response(long requestorId, long instanceId, long ranFuncId, Bytes &out,

@@ -84,7 +84,7 @@ int probe_e2ap(const std::string &dir, const Bytes &def) {
     ASN_STRUCT_FREE(asn_DEF_E2AP_PDU, p);
   }
 
-  check(build_subscription_response(1234, 7, 2, {1, 3}, b, err), ("build RICsubscriptionResponse " + err).c_str());
+  check(build_subscription_response(1234, 7, 2, {1, 3}, {}, b, err), ("build RICsubscriptionResponse " + err).c_str());
   if (E2AP_PDU_t *p = roundtrip(dir, "subscription-response", b)) {
     auto &l = p->choice.successfulOutcome->value.choice.RICsubscriptionResponse.protocolIEs.list;
     bool fn = false, acts = false;

@@ -1,0 +1,38 @@
+NIST e2sim asn1c (e2-interface da6f82f2): APER encoding of an extension enumeration index.
+Applied to the agent's copy only (Dockerfile); NIST's libe2sim is built from the unpatched tree.
+--- a/NativeEnumerated_aper.c
++++ b/NativeEnumerated_aper.c
+@@ -143,15 +143,25 @@
+         ASN__ENCODE_FAILED;
+ 
+     /*
+-     * X.691, #10.6: normally small non-negative whole number;
++     * X.691 #14.3: the index of an extension addition is a normally small
++     * non-negative whole number (#11.6): "0" and six bits when it is at most
++     * 63, else "1" and a semi-constrained whole number (aligned length octet,
++     * then the value octets): the form NativeEnumerated_decode_aper reads with
++     * aper_get_nsnnwn(pd, 65537). aper_put_nsnnwn with the root range wrote the
++     * index in the root's bit width instead, which no X.691 decoder (this
++     * runtime's own included) reads back as the same value.
+      */
+-    ASN_DEBUG("value = %ld, ext = %d, inext = %d, res = %ld",
+-              value, specs->extension, inext,
+-              value - (inext ? (specs->extension - 1) : 0));
+-    if(aper_put_nsnnwn(po,
+-                       ct->upper_bound - ct->lower_bound + 1,
+-                       value - (inext ? (specs->extension - 1) : 0)))
+-        ASN__ENCODE_FAILED;
++    value -= inext ? (specs->extension - 1) : 0;
++    ASN_DEBUG("value = %ld, ext = %d, inext = %d", value, specs->extension, inext);
++    if(value <= 63) {
++        if(per_put_few_bits(po, value, 7))
++            ASN__ENCODE_FAILED;
++    } else {
++        int octets = value <= 0xff ? 1 : 2;
++        if(value > 0xffff || per_put_few_bits(po, 1, 1) || aper_put_align(po) < 0
++           || per_put_few_bits(po, octets, 8) || per_put_few_bits(po, value, 8 * octets))
++            ASN__ENCODE_FAILED;
++    }
+ 
+     ASN__ENCODED_OK(er);
+ }

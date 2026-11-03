@@ -31,9 +31,14 @@ void print_stats_line(const Stats &s, const char *event, const std::string &reas
   j["lastSeq"] = s.lastSeq;
   j["samplesIn"] = s.samplesIn;
   j["samplesForwarded"] = s.samplesForwarded;
+  j["samplesUnreported"] = s.samplesUnreported;
+  j["samplesGapDiscarded"] = s.samplesGapDiscarded;
+  j["samplesReportFailed"] = s.samplesReportFailed;
   j["dropped"] = {{"e2Down", s.droppedE2Down}, {"noSub", s.droppedNoSub}, {"sendBusy", s.droppedSendBusy},
-                  {"encode", s.droppedEncode}, {"beforeHello", s.samplesBeforeHello}, {"badNode", s.samplesBadNode}};
-  j["uesDropped"] = {{"oversize", s.uesDroppedOversize}, {"badImsi", s.uesDroppedBadImsi}};
+                  {"encode", s.droppedEncode}, {"beforeHello", s.samplesBeforeHello}, {"badNode", s.samplesBadNode},
+                  {"reportGaps", s.reportGaps}};
+  j["uesDropped"] = {{"oversize", s.uesDroppedOversize}, {"badImsi", s.uesDroppedBadImsi},
+                     {"duplicateImsi", s.uesDroppedDuplicateImsi}};
   j["chunkSplits"] = s.chunkSplits;
   j["int32Overflow"] = s.conv.int32Overflow;
   j["typeMismatch"] = s.conv.typeMismatch;
@@ -47,6 +52,7 @@ void print_stats_line(const Stats &s, const char *event, const std::string &reas
   j["e2"] = {{"connectAttempts", s.connectAttempts}, {"connectFailures", s.connectFailures}, {"setups", s.setups},
              {"rxPdu", s.rxPdu}, {"rxPduUndecodable", s.rxPduUndecodable}, {"subsAdded", s.subsAdded},
              {"subsReplaced", s.subsReplaced}, {"subsDeleted", s.subsDeleted}, {"subsOtherFunc", s.subsOtherFunc},
+             {"subsRefused", s.subsRefused}, {"actionsNotAdmitted", s.actionsNotAdmitted},
              {"serviceQueries", s.serviceQueries}, {"errorIndications", s.errorIndications},
              {"otherPdus", s.otherPdus}, {"ctrlSendFailed", s.ctrlSendFailed}};
   j["rc"] = {{"rx", s.ctlRx}, {"rejFunc", s.ctlRejFunc}, {"rejDecode", s.ctlRejDecode},

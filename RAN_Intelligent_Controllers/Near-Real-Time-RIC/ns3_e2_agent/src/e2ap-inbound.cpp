@@ -27,11 +27,20 @@ void summarize_subscription(const RICsubscriptionRequest_t &r, InboundPdu &o) {
         o.ranFuncId = ie->value.choice.RANfunctionID;
         break;
       case RICsubscriptionRequest_IEs__value_PR_RICsubscriptionDetails: {
-        const auto &acts = ie->value.choice.RICsubscriptionDetails.ricAction_ToBeSetup_List.list;
+        const RICsubscriptionDetails_t &d = ie->value.choice.RICsubscriptionDetails;
+        o.eventTrigger.assign(d.ricEventTriggerDefinition.buf,
+                              d.ricEventTriggerDefinition.buf + d.ricEventTriggerDefinition.size);
+        const auto &acts = d.ricAction_ToBeSetup_List.list;
         for (int k = 0; k < acts.count; k++) {
-          const auto *a = (const RICaction_ToBeSetup_ItemIEs_t *)acts.array[k];
-          o.actionIds.push_back(a->value.choice.RICaction_ToBeSetup_Item.ricActionID);
-          o.actionTypes.push_back(a->value.choice.RICaction_ToBeSetup_Item.ricActionType);
+          const RICaction_ToBeSetup_Item_t &a =
+              ((const RICaction_ToBeSetup_ItemIEs_t *)acts.array[k])->value.choice.RICaction_ToBeSetup_Item;
+          o.actionIds.push_back(a.ricActionID);
+          o.actionTypes.push_back(a.ricActionType);
+          o.actionHasDefinition.push_back(a.ricActionDefinition != nullptr);
+          o.actionDefinitions.emplace_back();
+          if (a.ricActionDefinition)
+            o.actionDefinitions.back().assign(a.ricActionDefinition->buf,
+                                              a.ricActionDefinition->buf + a.ricActionDefinition->size);
         }
         break;
       }

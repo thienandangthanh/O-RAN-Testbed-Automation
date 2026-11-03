@@ -33,9 +33,19 @@ class E2Session {
   // Orderly stop (SIGTERM): end the association with SHUTDOWN, bounded.
   void stop(int timeoutMs) { sctp_.graceful_close(timeoutMs); }
   size_t subscriptions() const { return subs_.size(); }
-  // Sends the sample's indications under every subscription (option A).
-  // Returns true when every indication was sent.
-  bool forward(const EncodedSample &s);
+  // Adds the sample to every subscription's reporting period; reporting periods
+  // are aligned to the first sample a subscription sees. A subscription whose
+  // period is complete (P / T consecutive samples) gets one report: the cell
+  // indication then the UE indications. A seq gap restarts the period (its
+  // samples are counted in samplesGapDiscarded). samplesForwarded counts the
+  // samples that went out in a report, samplesReportFailed those of a report
+  // that could not be encoded or sent (the other subscriptions are still
+  // served). Returns false when a report failed.
+  bool forward(const SampleRecords &r, const SampleEncoder &enc, const HelloInfo &hello);
+  // Ends every reporting period in progress without reporting it (ns-3 sent
+  // bye or disconnected: the period never ended); its samples are counted in
+  // samplesUnreported.
+  void end_reports();
   // Receives every RICcontrolRequest (READY state only).
   void set_control_handler(std::function<void(const InboundPdu &)> h) { onControl_ = std::move(h); }
   // Sends one E2AP PDU on the association (association loss: exit 2).
@@ -47,6 +57,7 @@ class E2Session {
   void attempt_failed(const std::string &why, int64_t nowMs);
   void handle_pdu(const Bytes &pdu);
   void on_subscription(const InboundPdu &p);
+  bool send_report(Subscription &sub, const EncodedReport &rep);
 
   const Config &cfg_;
   const Bytes &ranFuncDef_;

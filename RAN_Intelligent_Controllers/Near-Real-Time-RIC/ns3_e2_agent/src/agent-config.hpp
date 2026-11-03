@@ -29,6 +29,16 @@ struct Config {
   int uesPerInd = 4;              // E2_UES_PER_IND
   int maxE2smBytes = 7000;        // E2_MAX_E2SM_BYTES
   int statsIntervalS = 5;         // E2_STATS_INTERVAL_S
+  // E2_INDICATION_PERIOD_MS: ns-3's indication period T (--indicationPeriodicity).
+  // Known at start, so a RIC subscription that arrives before ns-3's hello (the
+  // usual order: the gates start ns-3 after the subscription) is admitted or
+  // refused against the same T; a hello with another periodNs is rejected.
+  long indicationPeriodMs = 100;
+  // E2_MAX_REPORT_RECORDS: largest K = P / T (measData items per RIC INDICATION)
+  // the agent admits. Bounds the samples buffered per subscription and the size
+  // of the (unchunked) cell Format 1 message: at the default the cell and UE
+  // messages of the worst case stay within E2_MAX_E2SM_BYTES (tested).
+  long maxReportRecords = 20;
   long testWithholdStep = -2;     // E2_TEST_WITHHOLD_STEP (test only): never send step <k>
   long testWithholdNode = 0;      // E2_TEST_WITHHOLD_NODE (test only): withhold only on this node id (0 = any)
 };
