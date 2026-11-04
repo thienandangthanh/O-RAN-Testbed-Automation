@@ -1,20 +1,23 @@
 diff --git a/src/ts_xapp/en_gnb_ue_id_test.cpp b/src/ts_xapp/en_gnb_ue_id_test.cpp
 new file mode 100644
-index 0000000..255c230
+index 0000000..f7d4dac
 --- /dev/null
 +++ b/src/ts_xapp/en_gnb_ue_id_test.cpp
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,92 @@
 +/*
 +    Mnemonic:	en_gnb_ue_id_test.cpp
-+    Abstract:	Unit test of parse_en_gnb_ue_id (en_gnb_ue_id.hpp): valid tags, values out of range and tags of
-+                another form. Built and run by `make` (src/ts_xapp/CMakeLists.txt), so the image build fails
-+                when it fails. Prints PASS/FAIL <tag>; exit 0 only if every case passes.
++    Abstract:	Unit test of the header-only helpers of the TS xApp's control path: parse_en_gnb_ue_id
++                (en_gnb_ue_id.hpp) with valid tags, values out of range and tags of another form, and
++                influx_csv_has_time_record (influx_csv.hpp) with a result, empty answers and InfluxDB's streamed
++                error table. Built and run by `make` (src/ts_xapp/CMakeLists.txt), so the image build fails when
++                it fails. Prints PASS/FAIL <case>; exit 0 only if every case passes.
 +*/
 +
 +#include <cstdio>
 +#include <string>
 +
 +#include "en_gnb_ue_id.hpp"
++#include "influx_csv.hpp"
 +
 +static int failures = 0;
 +
@@ -32,6 +35,15 @@ index 0000000..255c230
 +  std::string why;
 +  bool ok = !ts::parse_en_gnb_ue_id( tag, id, why ) && !why.empty();
 +  printf( "%s refused \"%s\": %s\n", ok ? "PASS" : "FAIL", tag.c_str(), why.c_str() );
++  failures += ok ? 0 : 1;
++}
++
++static void csv( const char *name, const std::string &body, bool want ) {
++  std::string why;
++  bool got = ts::influx_csv_has_time_record( body, why );
++  bool ok = got == want && ( got || !why.empty() );
++  printf( "%s csv %s -> %s%s%s\n", ok ? "PASS" : "FAIL", name, got ? "row" : "none", why.empty() ? "" : ": ",
++          why.c_str() );
 +  failures += ok ? 0 : 1;
 +}
 +
@@ -60,6 +72,26 @@ index 0000000..255c230
 +  refused( "enGnbUeId:5@00F110" );
 +  refused( "enGnbUeId:5-00F110@00001" );
 +  refused( "enGnbUeId:5@00F110-000-1" );
++
++  // the answer of the TS xApp's query (keep(columns: ["_time"])), as InfluxDB 2.7 sends it
++  csv( "one-row", ",result,table,_time\r\n,_result,0,2026-11-04T12:00:00Z\r\n\r\n", true );
++  csv( "two-tables", ",result,table,_time\r\n,_result,0,\r\n\r\n,result,table,_time\r\n"
++       ",_result,1,2026-11-04T12:00:00Z\r\n", true );
++  csv( "annotated-one-row", "#datatype,string,long,dateTime:RFC3339\n#group,false,false,false\n#default,_result,,\n"
++       ",result,table,_time\n,,0,2026-11-04T12:00:00Z\n", true );
++  csv( "empty-body", "", false );
++  csv( "blank-lines", "\r\n\r\n", false );
++  csv( "annotations-and-header-only", "#datatype,string,long,dateTime:RFC3339\n#group,false,false,false\n"
++       "#default,_result,,\n,result,table,_time\n", false );
++  csv( "streamed-error", "#datatype,string,string\n#group,true,true\n#default,,\n,error,reference\n"
++       ",query failed,\n", false );
++  csv( "streamed-error-quoted", ",error,reference\n,\"error calling function \"\"x\"\", line 1\",\n", false );
++  csv( "error-header-only-then-result", ",error,reference\n\n,result,table,_time\n,_result,0,2026-11-04T12:00:00Z\n",
++       false );
++  csv( "result-then-error", ",result,table,_time\n,_result,0,2026-11-04T12:00:00Z\n\n,error,reference\n"
++       ",query failed,\n", false );
++  csv( "empty-time-cell", ",result,table,_time\n,_result,0,\n", false );
++  csv( "no-time-column", ",result,table,_value\n,_result,0,1\n", false );
 +
 +  printf( "en_gnb_ue_id_test: %s\n", failures ? "FAIL" : "ok" );
 +  return failures ? 1 : 0;

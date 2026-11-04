@@ -17,8 +17,10 @@ ext/protobuf/rc.pb.h.patch
 # DC PSCell Change control (E2SM-RC CONTROL Style 5 action 3) to the source en-gNB, the node of the serving cell
 # the QP prediction names first; the RC UE ID en-gNB-UEID is parsed from the ueId tag kpimon writes, and the control
 # is sent only when a UeMetrics point carries exactly that tag (Influx v2 query; descriptor controls influx_*,
-# set by the installer); the tag parser and its unit test, which make runs
+# set by the installer); the tag parser, the reader of the query's annotated CSV answer (an HTTP 200 answer can be an
+# error table) and their unit test, which make runs
 src/ts_xapp/en_gnb_ue_id.hpp.patch
+src/ts_xapp/influx_csv.hpp.patch
 src/ts_xapp/en_gnb_ue_id_test.cpp.patch
 src/ts_xapp/CMakeLists.txt.patch
 src/ts_xapp/ts_xapp.cpp.style5_en_gnb_ueid.patch

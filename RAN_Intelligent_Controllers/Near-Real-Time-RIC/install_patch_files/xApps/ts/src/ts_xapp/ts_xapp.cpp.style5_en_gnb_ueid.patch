@@ -1,16 +1,17 @@
 diff --git a/src/ts_xapp/ts_xapp.cpp b/src/ts_xapp/ts_xapp.cpp
-index 3b324f8..5cf1d5f 100644
+index 3b324f8..8bed462 100644
 --- a/src/ts_xapp/ts_xapp.cpp
 +++ b/src/ts_xapp/ts_xapp.cpp
-@@ -77,6 +77,7 @@
+@@ -77,6 +77,8 @@
  #include "protobuf/rc.grpc.pb.h"
  
  #include "utils/restclient.hpp"
 +#include "en_gnb_ue_id.hpp"
++#include "influx_csv.hpp"
  
  
  using namespace rapidjson;
-@@ -101,6 +102,20 @@ enum class TsControlApi { REST, gRPC };
+@@ -101,6 +103,20 @@ enum class TsControlApi { REST, gRPC };
  TsControlApi ts_control_api;  // api to send control messages
  string ts_control_ep;         // api target endpoint
  
@@ -31,7 +32,7 @@ index 3b324f8..5cf1d5f 100644
  typedef struct nodeb {
    string ran_name;
    struct {
-@@ -614,56 +629,128 @@ void send_rest_control_request( string ue_id, string serving_cell_id, string tar
+@@ -614,56 +630,124 @@ void send_rest_control_request( string ue_id, string serving_cell_id, string tar
  
  }
  
@@ -43,7 +44,7 @@ index 3b324f8..5cf1d5f 100644
 +  out->append( in, size * num );
 +  return size * num;
 +}
-+
+ 
 +/*
 +  True if at least one UeMetrics point in the bucket carries exactly the ueId tag `tag` within kUeMetricsWindow.
 +  The Flux query names only the measurement, the ueId tag and the time. `tag` must already be a parsed
@@ -95,20 +96,16 @@ index 3b324f8..5cf1d5f 100644
 +    why = "Influx query answered HTTP " + to_string( status ) + ": " + body.substr( 0, 200 );
 +    return false;
 +  }
-+  // annotated CSV without annotations: a header line, then one line per point; empty lines separate tables
-+  int lines = 0;
-+  stringstream ss( body );
-+  for( string line; getline( ss, line ); ) {
-+    if( !line.empty() && line.back() == '\r' ) line.pop_back();
-+    if( !line.empty() && line[0] != '#' ) lines++;
-+  }
-+  if( lines < 2 ) {
-+    why = string( "no UeMetrics point with this ueId tag in the last " ) + ( kUeMetricsWindow + 1 );
++  // HTTP 200 may still carry an error table: the CSV structure decides (influx_csv.hpp)
++  string csvWhy;
++  if( !ts::influx_csv_has_time_record( body, csvWhy ) ) {
++    why = string( "no UeMetrics point with this ueId tag in the last " ) + ( kUeMetricsWindow + 1 ) + " (" + csvWhy +
++          ")";
 +    return false;
 +  }
 +  return true;
 +}
- 
++
 +/*
 +  Sends a DC PSCell Change control (E2SM-RC CONTROL Style 5 "Dual Connectivity control", action 3, v03.00
 +  7.6.6.1) to RC xApp through gRPC: the UE `ue_id` (the ueId tag kpimon writes, en-gNB-UEID) is moved from its
@@ -198,7 +195,7 @@ index 3b324f8..5cf1d5f 100644
    grpc::Status status = rc_stub->SendRICControlReqServiceGrpc( &context, *request, &response );
  
    if( status.ok() ) {
-@@ -711,6 +798,10 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
+@@ -711,6 +795,10 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
  
    // Getting the current serving cell throughput prediction
    auto cell = throughput_map.find( handler.serving_cell_id );
@@ -209,7 +206,7 @@ index 3b324f8..5cf1d5f 100644
    serving_cell_throughput = cell->second;
  
     // Iterating to identify the highest throughput prediction
-@@ -737,7 +828,7 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
+@@ -737,7 +825,7 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
      if ( ts_control_api == TsControlApi::REST ) {
        send_rest_control_request( handler.ue_id, handler.serving_cell_id, highest_throughput_cell_id );
      } else {
@@ -218,7 +215,7 @@ index 3b324f8..5cf1d5f 100644
      }
  
    } else {
-@@ -902,6 +993,21 @@ extern int main( int argc, char** argv ) {
+@@ -902,6 +990,21 @@ extern int main( int argc, char** argv ) {
        cout << "[ERROR] unable to map cells to nodeb\n";
      }
  

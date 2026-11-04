@@ -1,0 +1,107 @@
+diff --git a/src/ts_xapp/influx_csv.hpp b/src/ts_xapp/influx_csv.hpp
+new file mode 100644
+index 0000000..4fcbd08
+--- /dev/null
++++ b/src/ts_xapp/influx_csv.hpp
+@@ -0,0 +1,101 @@
++/*
++    Mnemonic:	influx_csv.hpp
++    Abstract:	Reads the answer of an InfluxDB v2 Flux query (/api/v2/query, annotated CSV). Tables are separated
++                by empty lines; in each table the lines starting with '#' are annotations, the first other line is
++                the header and the lines after it are records. InfluxDB answers a query that fails while it streams
++                with HTTP 200 and an error table (a header with an "error" column), so the HTTP status alone does
++                not tell a result from an error. Header only, without dependencies, so that the unit test
++                (en_gnb_ue_id_test.cpp) builds on its own.
++*/
++
++#ifndef _INFLUX_CSV_HPP
++#define _INFLUX_CSV_HPP
++
++#include <sstream>
++#include <string>
++#include <vector>
++
++namespace ts {
++
++namespace detail {
++// One CSV line (RFC 4180: a quoted field may hold commas and doubled quotes) split into its fields.
++inline std::vector<std::string> csv_fields( const std::string &line ) {
++  std::vector<std::string> out( 1 );
++  bool quoted = false;
++  for( size_t i = 0; i < line.size(); i++ ) {
++    const char c = line[i];
++    if( quoted ) {
++      if( c == '"' && i + 1 < line.size() && line[i + 1] == '"' ) {
++        out.back() += '"';
++        i++;
++      } else if( c == '"' ) {
++        quoted = false;
++      } else {
++        out.back() += c;
++      }
++    } else if( c == '"' ) {
++      quoted = true;
++    } else if( c == ',' ) {
++      out.emplace_back();
++    } else {
++      out.back() += c;
++    }
++  }
++  return out;
++}
++}  // namespace detail
++
++/*
++    True if the query answer holds at least one record with a non-empty _time cell. False, with the reason in
++    why, if the answer is empty, if any table's header names an "error" column (the error message is quoted in
++    why), if a table has no _time column, or if no record has a _time value.
++*/
++inline bool influx_csv_has_time_record( const std::string &body, std::string &why ) {
++  std::stringstream ss( body );
++  bool expectHeader = true;
++  int timeCol = -1;
++  int errorCol = -1;
++  bool sawError = false;
++  size_t records = 0;
++  for( std::string line; std::getline( ss, line ); ) {
++    if( !line.empty() && line.back() == '\r' ) line.pop_back();
++    if( line.empty() ) {  // the next table begins
++      expectHeader = true;
++      continue;
++    }
++    if( line[0] == '#' ) continue;  // annotation
++    const std::vector<std::string> f = detail::csv_fields( line );
++    if( expectHeader ) {
++      expectHeader = false;
++      timeCol = errorCol = -1;
++      for( size_t i = 0; i < f.size(); i++ ) {
++        if( f[i] == "_time" ) timeCol = (int)i;
++        if( f[i] == "error" ) errorCol = (int)i;
++      }
++      sawError = sawError || errorCol >= 0;
++      if( errorCol < 0 && timeCol < 0 ) {
++        why = "Influx answer has a table without a _time column";
++        return false;
++      }
++      continue;
++    }
++    if( errorCol >= 0 ) {
++      why = "Influx answered an error table: " + ( (size_t)errorCol < f.size() ? f[errorCol] : std::string() );
++      return false;
++    }
++    if( (size_t)timeCol < f.size() && !f[timeCol].empty() ) records++;
++  }
++  if( sawError ) {
++    why = "Influx answered an error table without a message";
++    return false;
++  }
++  if( records == 0 ) {
++    why = "no record with a _time value";
++    return false;
++  }
++  return true;
++}
++
++}  // namespace ts
++
++#endif
