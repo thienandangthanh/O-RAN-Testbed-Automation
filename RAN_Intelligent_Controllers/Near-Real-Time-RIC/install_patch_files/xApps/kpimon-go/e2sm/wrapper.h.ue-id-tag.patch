@@ -1,0 +1,29 @@
+diff --git a/e2sm/wrapper.h b/e2sm/wrapper.h
+index a5ac656..71ba45c 100644
+--- a/e2sm/wrapper.h
++++ b/e2sm/wrapper.h
+@@ -81,6 +81,13 @@
+ #include <E2SM-KPM-IndicationMessage.h>
+ #include <E2SM-KPM-IndicationMessage-Format1.h>
+ #include <E2SM-KPM-IndicationMessage-Format2.h>
++#include <MeasurementCondUEidList.h>
++#include <MeasurementCondUEidItem.h>
++#include <MatchingUEidList.h>
++#include <MatchingUEidItem.h>
++#include <UEID.h>
++#include <UEID-EN-GNB.h>
++#include <UEID-ENB.h>
+ #include <TimeStamp.h>
+ #include<per_encoder.h>
+ #include <errno.h>
+@@ -137,4 +144,10 @@ void e2sm_free_ric_indication_header(E2SM_KPM_IndicationHeader_t* indHdr);
+ E2SM_KPM_IndicationMessage_t* e2sm_decode_ric_indication_message(void *buffer, size_t buf_size);
+ void e2sm_free_ric_indication_message(E2SM_KPM_IndicationMessage_t* indMsg);
+ 
++/* The UeMetrics ueId tag of the UE at position ue_index of every measCondUEidList item's matchingUEidList:
++ * "enGnbUeId:<m-eNB-UE-X2AP-ID>@<PLMN identity hex>-<macro eNB ID %05X>" for an en-gNB-UEID,
++ * "enbUeId:<mME-UE-S1AP-ID>@<m-eNB-UE-X2AP-ID>" for an eNB-UEID. Returns the tag length with the tag in buf, or
++ * -1 with the reason in buf when the items disagree, a list is missing or short, or the UE ID is of another CHOICE. */
++int e2sm_kpm_format2_ue_id_tag(const E2SM_KPM_IndicationMessage_Format2_t *msg, size_t ue_index, char *buf, size_t buf_size);
++
+ #endif /* _WRAPPER_H_ */

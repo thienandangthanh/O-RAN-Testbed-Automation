@@ -1,0 +1,66 @@
+diff --git a/control/control.go b/control/control.go
+index 268d4fb..29383b9 100644
+--- a/control/control.go
++++ b/control/control.go
+@@ -976,6 +976,20 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
+ 			}
+ 		}
+ 
++		// The ueId tag of each UE, read once per indication from measCondUEidList.
++		ueIdTags := make(map[int32]string)
++		ueIdTag := func(n int32) string {
++			if tag, ok := ueIdTags[n]; ok {
++				return tag
++			}
++			tag, err := kpmFormat2UeIdTag(indMsgFormat2_C, n)
++			if err != nil {
++				xapp.Logger.Error("E2 node %s: no ueId tag for UE %d of a KPM Format 2 indication: %v", params.Meid.RanName, n, err)
++			}
++			ueIdTags[n] = tag
++			return tag
++		}
++
+ 		// One measData item per granularity period of the reporting period.
+ 		var sizeof_MeasurementDataItem_t *C.MeasurementDataItem_t
+ 		for t := int32(0); t < int32(indMsgFormat2_C.measData.list.count); t++ {
+@@ -1028,7 +1042,7 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
+ 				if len(values) == 0 {
+ 					continue // a UE without any value in this period (noValue records): nothing to store
+ 				}
+-				c.writeUeMetrics_db(&values) //push UEmetrics map entry to database.
++				c.writeUeMetrics_db(&values, ueIdTag(n)) //push UEmetrics map entry to database.
+ 
+ 			} // end of outer for loop
+ 		} // end of measData items
+@@ -1108,7 +1122,20 @@ func (c *Control) handleIndication(params *xapp.RMRParams) (err error) {
+ 		c.writeCellMetrics_db(results.results.series)
+ 	}
+ */
+-func (c *Control) writeUeMetrics_db(ueMetrics *map[string]interface{}) {
++// kpmFormat2UeIdTag returns the ueId tag of the UE at position ueIndex of a KPM Indication Message Format 2
++// (e2sm_kpm_format2_ue_id_tag), or the reason it has none.
++func kpmFormat2UeIdTag(msg *C.E2SM_KPM_IndicationMessage_Format2_t, ueIndex int32) (string, error) {
++	var buf [128]C.char
++	n := C.e2sm_kpm_format2_ue_id_tag(msg, C.size_t(ueIndex), &buf[0], C.size_t(len(buf)))
++	text := C.GoString(&buf[0])
++	if n < 0 {
++		return "", errors.New(text)
++	}
++	return text, nil
++}
++
++// writeUeMetrics_db writes one UeMetrics point; ueIdTag, when not empty, becomes its ueId tag.
++func (c *Control) writeUeMetrics_db(ueMetrics *map[string]interface{}, ueIdTag string) {
+ 	writeAPI := c.client.WriteAPIBlocking("influxdata", "kpimon")
+ 	/*
+ 		ueMetricsJSON, err := json.Marshal(ueMetrics)
+@@ -1121,6 +1148,9 @@ func (c *Control) writeUeMetrics_db(ueMetrics *map[string]interface{}) {
+ 			SetTime(time.Now())
+ 	*/
+ 	p := influxdb2.NewPointWithMeasurement("UeMetrics").SetTime(time.Now())
++	if ueIdTag != "" {
++		p = p.AddTag("ueId", ueIdTag)
++	}
+ 	for key, value := range *ueMetrics {
+ 		p = p.AddField(key, value)
+ 	}

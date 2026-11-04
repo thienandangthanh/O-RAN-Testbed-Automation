@@ -51,6 +51,12 @@ set -e
 # install_patch_files/xApps/kpimon-go/patches.manifest; the image is labelled
 # patchset.sha256 (sha256 of the manifest followed by each listed file, in order) and
 # kpimon.timestamp-size8, and is rebuilt whenever a label differs.
+# Modified 2026-11-04 (ns-O-RAN L-release port): every UeMetrics point kpimon writes
+# carries a ueId tag decoded from the UE ID of the KPM Indication Message Format 2
+# (en-gNB-UEID "enGnbUeId:<m-eNB-UE-X2AP-ID>@<PLMN>-<macro eNB ID>", eNB-UEID
+# "enbUeId:<mME-UE-S1AP-ID>@<m-eNB-UE-X2AP-ID>"); a UE ID of another CHOICE is logged
+# as an error and its point has no ueId tag (e2sm/wrapper.[ch].ue-id-tag.patch,
+# control/control.go.ue-id-tag.patch).
 CLEAN_INSTALL="${CLEAN_INSTALL:-false}"
 KPIMON_REPORTING_PERIOD_MS="${KPIMON_REPORTING_PERIOD_MS:-100}"
 KPIMON_GRANULARITY_PERIOD_MS="${KPIMON_GRANULARITY_PERIOD_MS:-100}"
@@ -138,6 +144,7 @@ if [ ! -f "e2sm/wrapper.previous.c" ]; then
     cp e2sm/wrapper.previous.c "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/wrapper.previous.c"
 fi
 git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/wrapper.c.patch"
+git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/wrapper.c.ue-id-tag.patch"
 
 git restore e2sm/wrapper.h
 if [ ! -f "e2sm/wrapper.previous.h" ]; then
@@ -145,6 +152,7 @@ if [ ! -f "e2sm/wrapper.previous.h" ]; then
     cp e2sm/wrapper.h e2sm/wrapper.previous.h
 fi
 git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/wrapper.h.patch"
+git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/e2sm/wrapper.h.ue-id-tag.patch"
 
 echo "Updating E2SM-KPM MatchingCondItem bindings to the KPM v2.03 layout..."
 git restore e2sm/asn1/kpm2_0.asn
@@ -185,6 +193,7 @@ echo "Applying the eNB KPM measurement lists (e2mgr keeps no RAN functions for a
 python3 -I "$PARENT_DIR/ns3_e2_agent/tests/lint-metric-map.py" "$PARENT_DIR/ns3_e2_agent/schema/metric-map.v1.json" \
     --kpimon-enb "$PARENT_DIR/install_patch_files/xApps/kpimon-go/control/enb-kpm-measurements.json"
 git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/control/control.go.enb-measurements.patch"
+git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/control/control.go.ue-id-tag.patch"
 git apply --verbose --ignore-whitespace "$PARENT_DIR/install_patch_files/xApps/kpimon-go/control/types.go.patch"
 cp "$PARENT_DIR/install_patch_files/xApps/kpimon-go/control/enb-kpm-measurements.json" control/enb-kpm-measurements.json
 

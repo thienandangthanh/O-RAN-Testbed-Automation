@@ -1,0 +1,111 @@
+diff --git a/e2sm/wrapper.c b/e2sm/wrapper.c
+index adeab4b..afacca4 100644
+--- a/e2sm/wrapper.c
++++ b/e2sm/wrapper.c
+@@ -1237,3 +1237,106 @@ void e2sm_free_ric_indication_message(E2SM_KPM_IndicationMessage_t *indMsg)
+ {
+         ASN_STRUCT_FREE(asn_DEF_E2SM_KPM_IndicationMessage, indMsg);
+ }
++
++/* Writes a NUL-terminated reason into buf (truncated to fit) and returns -1. */
++static int ue_id_tag_error(char *buf, size_t buf_size, const char *reason)
++{
++        if (buf_size > 0)
++                snprintf(buf, buf_size, "%s", reason);
++        return -1;
++}
++
++/* Returns the length of the snprintf output, or -1 with a reason in buf when it did not fit. */
++static int ue_id_tag_fits(int n, char *buf, size_t buf_size)
++{
++        if (n < 0 || (size_t)n >= buf_size)
++                return ue_id_tag_error(buf, buf_size, "ueId tag buffer too small");
++        return n;
++}
++
++/*
++ * The ueId tag text of one E2SM UE ID:
++ *   en-gNB-UEID: "enGnbUeId:<m-eNB-UE-X2AP-ID>@<PLMN identity, 6 uppercase hex digits>-<macro eNB ID, %05X>"
++ *   eNB-UEID:    "enbUeId:<mME-UE-S1AP-ID>@<m-eNB-UE-X2AP-ID>"
++ * Any other UE ID CHOICE, an eNB ID that is not a 20-bit macro eNB ID, or an eNB-UEID without its
++ * m-eNB-UE-X2AP-ID has no tag: the function returns -1 with the reason in buf.
++ */
++static int format_ue_id_tag(const UEID_t *ue_id, char *buf, size_t buf_size)
++{
++        if (ue_id->present == UEID_PR_en_gNB_UEID)
++        {
++                const UEID_EN_GNB_t *en_gnb = ue_id->choice.en_gNB_UEID;
++                if (en_gnb == NULL)
++                        return ue_id_tag_error(buf, buf_size, "en-gNB-UEID without content");
++                const PLMNIdentity_t *plmn = &en_gnb->globalENB_ID.pLMNIdentity;
++                const ENB_ID_t *enb_id = &en_gnb->globalENB_ID.eNB_ID;
++                if (plmn->buf == NULL || plmn->size != 3)
++                        return ue_id_tag_error(buf, buf_size, "en-gNB-UEID globalENB-ID pLMNIdentity is not 3 octets");
++                if (enb_id->present != ENB_ID_PR_macro_eNB_ID)
++                        return ue_id_tag_error(buf, buf_size, "en-gNB-UEID globalENB-ID eNB-ID is not a macro-eNB-ID");
++                const BIT_STRING_t *macro = &enb_id->choice.macro_eNB_ID;
++                if (macro->buf == NULL || macro->size != 3 || macro->bits_unused != 4)
++                        return ue_id_tag_error(buf, buf_size, "en-gNB-UEID macro-eNB-ID is not 20 bits");
++                unsigned long macro_enb_id = ((unsigned long)macro->buf[0] << 12) | ((unsigned long)macro->buf[1] << 4) |
++                                             ((unsigned long)macro->buf[2] >> 4);
++                return ue_id_tag_fits(snprintf(buf, buf_size, "enGnbUeId:%ld@%02X%02X%02X-%05lX",
++                                               (long)en_gnb->m_eNB_UE_X2AP_ID, plmn->buf[0], plmn->buf[1], plmn->buf[2],
++                                               macro_enb_id),
++                                      buf, buf_size);
++        }
++        if (ue_id->present == UEID_PR_eNB_UEID)
++        {
++                const UEID_ENB_t *enb = ue_id->choice.eNB_UEID;
++                if (enb == NULL)
++                        return ue_id_tag_error(buf, buf_size, "eNB-UEID without content");
++                if (enb->m_eNB_UE_X2AP_ID == NULL)
++                        return ue_id_tag_error(buf, buf_size, "eNB-UEID without m-eNB-UE-X2AP-ID");
++                return ue_id_tag_fits(snprintf(buf, buf_size, "enbUeId:%lu@%ld", (unsigned long)enb->mME_UE_S1AP_ID,
++                                               (long)*enb->m_eNB_UE_X2AP_ID),
++                                      buf, buf_size);
++        }
++        char reason[64];
++        snprintf(reason, sizeof(reason), "UE ID CHOICE %d is neither en-gNB-UEID nor eNB-UEID", (int)ue_id->present);
++        return ue_id_tag_error(buf, buf_size, reason);
++}
++
++int e2sm_kpm_format2_ue_id_tag(const E2SM_KPM_IndicationMessage_Format2_t *msg, size_t ue_index, char *buf, size_t buf_size)
++{
++        if (buf == NULL || buf_size == 0)
++                return -1;
++        if (msg == NULL)
++                return ue_id_tag_error(buf, buf_size, "no Format 2 message");
++        const MeasurementCondUEidList_t *cond_list = &msg->measCondUEidList;
++        if (cond_list->list.count <= 0)
++                return ue_id_tag_error(buf, buf_size, "empty measCondUEidList");
++        char item_tag[128];
++        for (int i = 0; i < cond_list->list.count; i++)
++        {
++                const MeasurementCondUEidItem_t *item = cond_list->list.array[i];
++                char reason[128];
++                if (item == NULL || item->matchingUEidList == NULL)
++                {
++                        snprintf(reason, sizeof(reason), "measCondUEidList item %d has no matchingUEidList", i);
++                        return ue_id_tag_error(buf, buf_size, reason);
++                }
++                if (ue_index >= (size_t)item->matchingUEidList->list.count || item->matchingUEidList->list.array[ue_index] == NULL)
++                {
++                        snprintf(reason, sizeof(reason), "measCondUEidList item %d lists %d UE IDs, no UE %zu", i,
++                                 item->matchingUEidList->list.count, ue_index);
++                        return ue_id_tag_error(buf, buf_size, reason);
++                }
++                const UEID_t *ue_id = &item->matchingUEidList->list.array[ue_index]->ueID;
++                if (i == 0)
++                {
++                        if (format_ue_id_tag(ue_id, buf, buf_size) < 0)
++                                return -1;
++                        continue;
++                }
++                if (format_ue_id_tag(ue_id, item_tag, sizeof(item_tag)) < 0 || strcmp(item_tag, buf) != 0)
++                {
++                        snprintf(reason, sizeof(reason), "measCondUEidList item %d names UE %zu differently from item 0", i, ue_index);
++                        return ue_id_tag_error(buf, buf_size, reason);
++                }
++        }
++        return (int)strlen(buf);
++}
