@@ -87,6 +87,7 @@ RUN mkdir -p /etc/ns3-e2-agent && cp /playpen/agent/schema/metric-map.v1.json /e
 # The image is kept only if the agent's codec and control-path unit tests pass.
 RUN mkdir /tmp/codec-probe && codec-probe /etc/ns3-e2-agent/metric-map.v1.json /tmp/codec-probe \
 	&& rc-control-test /usr/local/share/ns3-e2-agent/rc-control-requests.hex \
-		/usr/local/share/ns3-e2-agent/rc-control-nrcgi.hex && rm -rf /tmp/codec-probe
+		/usr/local/share/ns3-e2-agent/rc-control-nrcgi.hex \
+	&& ue-context-per-seq-test /etc/ns3-e2-agent/metric-map.v1.json && rm -rf /tmp/codec-probe
 
 ENTRYPOINT ["/usr/local/bin/ns3-e2-agent"]

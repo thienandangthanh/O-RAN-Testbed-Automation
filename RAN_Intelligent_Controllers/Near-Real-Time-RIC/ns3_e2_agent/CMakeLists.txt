@@ -82,10 +82,14 @@ target_link_libraries(rc-control-test ns3_e2_agent_core)
 add_executable(kpm-report-period-test tests/kpm-report-period-test.cpp)
 target_link_libraries(kpm-report-period-test ns3_e2_agent_core)
 
+add_executable(ue-context-per-seq-test tests/ue-context-per-seq-test.cpp)
+target_link_libraries(ue-context-per-seq-test ns3_e2_agent_core)
+
 add_executable(sctp-ppid-loopback-test tests/sctp-ppid-loopback-test.cpp src/sctp-association.cpp)
 target_link_libraries(sctp-ppid-loopback-test ns3_e2_agent_core)
 
-install(TARGETS ns3-e2-agent codec-probe rc-control-test kpm-report-period-test sctp-ppid-loopback-test
+install(TARGETS ns3-e2-agent codec-probe rc-control-test kpm-report-period-test ue-context-per-seq-test
+                sctp-ppid-loopback-test
         DESTINATION bin)
 install(TARGETS rc_codec x2ap_codec DESTINATION lib)
 install(FILES tests/fixtures/rc-control-requests.hex tests/fixtures/rc-control-nrcgi.hex tests/fixtures/ipc-samples-gnb2-seq26-35.jsonl

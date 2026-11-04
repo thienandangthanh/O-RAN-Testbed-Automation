@@ -67,6 +67,7 @@ void send_step(const Config &cfg, IpcServer &ipc, int64_t seq) {
 }
 
 void forward_sample(const json &m, SampleEncoder &enc, E2Session &e2, IpcState &st) {
+  if (m.contains("seq") && m["seq"].is_number_integer()) enc.prune_ue_contexts(m["seq"].get<int64_t>());
   if (!e2.ready()) {
     stats().droppedE2Down++;
     return;

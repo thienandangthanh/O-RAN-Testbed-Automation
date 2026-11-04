@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "asn-util.hpp"
+#include "kpm-ue-id.hpp"
 #include "metric-map.hpp"
 
 namespace agent {
@@ -47,22 +48,6 @@ bool encode_indication_header(const std::array<uint8_t, 8> &ts, const std::strin
 bool encode_format1(const std::vector<std::vector<MeasValue>> &periods, const std::vector<MetricRow> &rows,
                     unsigned long granulPeriodMs, Bytes &out, std::string &err);
 
-// The UE ID of one UE in a Format 2 message: the alternative of the E2SM
-// common UEID CHOICE (NIST's KPM v3 asn1c, UEID.h) for the reporting node's type. An en-gNB reports
-// en-gNB-UEID {m-eNB-UE-X2AP-ID, globalENB-ID}; the eNB reports eNB-UEID
-// {mME-UE-S1AP-ID, gUMMEI, m-eNB-UE-X2AP-ID} with globalENB-ID absent (it is
-// reported only by an SeNB). Every other optional field is absent. The IMSI is
-// never encoded as the KPM UE ID: there is no gNB-UEID alternative here.
-struct KpmUeId {
-  enum class Choice { EnGnb, Enb };
-  Choice choice = Choice::EnGnb;
-  uint32_t mEnbUeX2apId = 0;  // ENB-UE-X2AP-ID INTEGER (0..4095): the MN's LTE RNTI
-  uint32_t macroEnbId = 0;    // en-gNB: globalENB-ID macro eNB ID (20 bits): the MN's cellId
-  uint32_t mmeUeS1apId = 0;   // eNB: MME-UE-S1AP-ID INTEGER (0..2^32-1)
-};
-
-constexpr uint32_t kMaxEnbUeX2apId = 4095;
-constexpr uint32_t kMaxMacroEnbId = (1u << 20) - 1;
 // Fixed GUMMEI MME group ID (OCTET STRING SIZE(2)) and MME code (SIZE(1)) of
 // every eNB-UEID; its PLMN is the node's PLMN.
 constexpr uint16_t kGummeiMmeGroupId = 1;

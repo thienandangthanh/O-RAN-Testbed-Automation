@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <map>
 
 #include "agent-log.hpp"
@@ -43,8 +44,9 @@ bool get_ranged(const json &j, const char *key, int64_t lo, int64_t hi, int64_t 
 }
 
 // ueContext line -> imsi -> UE ID of a node of `kind` (see accept_ue_context).
-bool parse_ue_context(const json &l, const Config &cfg, std::map<uint64_t, KpmUeId> &out, std::string &reason) {
-  int64_t v = 0, node = 0, seq = 0;
+bool parse_ue_context(const json &l, const Config &cfg, int64_t &seq, std::map<uint64_t, KpmUeId> &out,
+                      std::string &reason) {
+  int64_t v = 0, node = 0;
   if (!get_i64(l, "v", v) || v != 1) {
     reason = "v is not 1";
     return false;
@@ -94,19 +96,22 @@ SampleEncoder::SampleEncoder(const Config &cfg, const MetricMap &map)
 
 bool SampleEncoder::accept_ue_context(const json &line, std::string &reason) {
   std::map<uint64_t, KpmUeId> next;
-  if (!parse_ue_context(line, cfg_, next, reason)) {
-    ueContexts_.clear();
+  int64_t seq = 0;
+  if (!parse_ue_context(line, cfg_, seq, next, reason)) {
+    contextsBySeq_.clear();
     stats().ueContextRejected++;
     return false;
   }
-  ueContexts_ = std::move(next);
+  contextsBySeq_[seq] = std::move(next);
   stats().ueContextRx++;
   return true;
 }
 
-void SampleEncoder::reset_ue_contexts() {
-  ueContexts_.clear();
-  builtUeIds_.clear();
+void SampleEncoder::reset_ue_contexts() { contextsBySeq_.clear(); }
+
+void SampleEncoder::prune_ue_contexts(int64_t seq) {
+  auto valid = contextsBySeq_.upper_bound(seq);
+  if (valid != contextsBySeq_.begin()) contextsBySeq_.erase(contextsBySeq_.begin(), std::prev(valid));
 }
 
 bool SampleEncoder::accept_hello(const json &h, HelloInfo &out, std::string &reason) const {
@@ -168,15 +173,20 @@ bool SampleEncoder::build(const json &s, SampleRecords &out, std::string &err) {
     }
     out.ues.emplace_back(u.first, build_records(map_.ue, s, u.second, stats().conv));
   }
+  prune_ue_contexts(out.seq);  // later samples have higher seqs
+  if (out.ues.empty()) return true;  // no UE: no context needed
+  // the line valid at this seq: the latest one whose seq is not above it (after the prune, the first one)
+  auto valid = contextsBySeq_.upper_bound(out.seq);
+  const std::map<uint64_t, KpmUeId> *ctx = valid == contextsBySeq_.begin() ? nullptr : &std::prev(valid)->second;
   std::string missing;
   for (const auto &u : out.ues)
-    if (!ueContexts_.count(u.first)) missing += (missing.empty() ? "" : ",") + std::to_string(u.first);
+    if (!ctx || !ctx->count(u.first)) missing += (missing.empty() ? "" : ",") + std::to_string(u.first);
   if (!missing.empty()) {
     stats().samplesNoUeContext++;
-    err = "seq " + std::to_string(out.seq) + ": UE imsi " + missing + " without ueContext";
+    err = "seq " + std::to_string(out.seq) + ": UE imsi " + missing + " without ueContext valid at that seq";
     return false;
   }
-  for (const auto &u : out.ues) builtUeIds_[u.first] = ueContexts_.at(u.first);
+  for (const auto &u : out.ues) out.ueIds.push_back(ctx->at(u.first));
   return true;
 }
 
@@ -204,35 +214,39 @@ bool SampleEncoder::encode(const std::vector<SampleRecords> &samples, const Hell
 
 bool SampleEncoder::encode_ue_chunks(const std::vector<SampleRecords> &samples, unsigned long granulMs,
                                      EncodedReport &out, std::string &err) const {
-  // UE list of the report: the union of the samples' UEs, ascending IMSI.
-  std::vector<uint64_t> ues;
-  for (const SampleRecords &r : samples)
-    for (const auto &u : r.ues) ues.push_back(u.first);
-  std::sort(ues.begin(), ues.end());
-  ues.erase(std::unique(ues.begin(), ues.end()), ues.end());
-  std::vector<std::map<uint64_t, const std::vector<MeasValue> *>> bySample(samples.size());
-  for (size_t t = 0; t < samples.size(); t++)
-    for (const auto &u : samples[t].ues) bySample[t][u.first] = &u.second;
+  // UE list of the report: the union of the samples' (IMSI, UE ID) pairs, ascending IMSI, an IMSI's IDs in the
+  // order they appeared; bySample[t][e] = the records of entry e in sample t.
+  std::vector<std::pair<uint64_t, KpmUeId>> entries;
+  std::vector<std::map<size_t, const std::vector<MeasValue> *>> bySample(samples.size());
+  for (size_t t = 0; t < samples.size(); t++) {
+    const SampleRecords &r = samples[t];
+    if (r.ueIds.size() != r.ues.size()) {
+      err = "seq " + std::to_string(r.seq) + ": UE records without their UE IDs (not built by this encoder)";
+      return false;
+    }
+    for (size_t u = 0; u < r.ues.size(); u++) {
+      std::pair<uint64_t, KpmUeId> key{r.ues[u].first, r.ueIds[u]};
+      auto e = std::find(entries.begin(), entries.end(), key);
+      if (e == entries.end()) e = entries.insert(entries.end(), key);
+      bySample[t][(size_t)(e - entries.begin())] = &r.ues[u].second;
+    }
+  }
+  std::vector<size_t> order(entries.size());
+  for (size_t e = 0; e < order.size(); e++) order[e] = e;
+  std::stable_sort(order.begin(), order.end(),
+                   [&](size_t a, size_t b) { return entries[a].first < entries[b].first; });
   const std::vector<MeasValue> absent(map_.ue.size());  // noValue records
 
   size_t i = 0;
-  while (i < ues.size()) {
-    size_t chunk = std::min<size_t>((size_t)cfg_.uesPerInd, ues.size() - i);
+  while (i < order.size()) {
+    size_t chunk = std::min<size_t>((size_t)cfg_.uesPerInd, order.size() - i);
     for (;;) {
       std::vector<std::vector<std::vector<MeasValue>>> periods(samples.size());
-      std::vector<uint64_t> imsis(ues.begin() + i, ues.begin() + i + chunk);
       std::vector<KpmUeId> ids;
-      for (uint64_t imsi : imsis) {
-        auto id = builtUeIds_.find(imsi);
-        if (id == builtUeIds_.end()) {
-          err = "UE imsi " + std::to_string(imsi) + " has no UE ID (its sample was not built by this encoder)";
-          return false;
-        }
-        ids.push_back(id->second);
-      }
+      for (size_t k = i; k < i + chunk; k++) ids.push_back(entries[order[k]].second);
       for (size_t t = 0; t < samples.size(); t++)
-        for (uint64_t imsi : imsis) {
-          auto f = bySample[t].find(imsi);
+        for (size_t k = i; k < i + chunk; k++) {
+          auto f = bySample[t].find(order[k]);
           periods[t].push_back(f == bySample[t].end() ? absent : *f->second);
         }
       Bytes msg;
@@ -244,7 +258,7 @@ bool SampleEncoder::encode_ue_chunks(const std::vector<SampleRecords> &samples, 
       }
       if (chunk == 1) {
         ALOG_W("UE imsi %llu alone encodes to %zu > E2_MAX_E2SM_BYTES=%d octets; dropped",
-               (unsigned long long)ues[i], msg.size(), cfg_.maxE2smBytes);
+               (unsigned long long)entries[order[i]].first, msg.size(), cfg_.maxE2smBytes);
         stats().uesDroppedOversize++;
         i += 1;
         break;

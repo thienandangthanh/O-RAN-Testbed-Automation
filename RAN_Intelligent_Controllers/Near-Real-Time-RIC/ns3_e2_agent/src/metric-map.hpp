@@ -12,6 +12,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "kpm-ue-id.hpp"
+
 namespace agent {
 
 enum class RecordType { Integer, Real };
@@ -50,12 +52,15 @@ struct MetricMap {
 };
 
 // The measurement records of one IPC sample, built once per sample: the cell
-// list records and, per UE (ascending, distinct IMSI), the UE list records.
+// list records and, per UE (ascending, distinct IMSI), the UE list records and
+// the UE's KPM UE ID from the ueContext line valid at the sample's seq
+// (ueIds[u] belongs to ues[u]).
 struct SampleRecords {
   int64_t seq = -1;
   int64_t simTimeNs = 0;
   std::vector<MeasValue> cell;
   std::vector<std::pair<uint64_t, std::vector<MeasValue>>> ues;
+  std::vector<KpmUeId> ueIds;
 };
 
 // Loads the rows of `kind` from `path`. Returns false and sets `err` on any
