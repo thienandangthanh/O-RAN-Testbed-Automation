@@ -34,8 +34,8 @@ echo "# Script: $(realpath "$0") $@"
 # More information can be found at: https://github.com/o-ran-sc/ric-app-rc and https://docs.o-ran-sc.org/projects/o-ran-sc-ric-app-rc/en/latest/overview.html
 #
 # Modified (2026-11): rc is reset to the commit pinned in commit_hashes.json and the patch set listed in
-# install_patch_files/xApps/rc/patches.manifest is applied in order (the RANParameter-ID bound and the APER NR CGI
-# target). The image is labelled rc.source.sha (the pinned commit) and patchset.sha256 (sha256 of patches.manifest
+# install_patch_files/xApps/rc/patches.manifest is applied in order (the RANParameter-ID bound, the APER NR CGI
+# target, and DC PSCell Change control with an en-gNB-UEID). The image is labelled rc.source.sha (the pinned commit) and patchset.sha256 (sha256 of patches.manifest
 # followed by each listed patch, in manifest order), and is rebuilt whenever that label differs.
 
 # Exit immediately if a command fails
@@ -97,6 +97,10 @@ RC_PATCHSET_SHA256=$( (cat "$RC_PATCH_DIR/patches.manifest" && for p in "${RC_PA
 git fetch -q origin "$RC_SOURCE_SHA" 2>/dev/null || true
 git checkout -q --detach "$RC_SOURCE_SHA"
 git reset -q --hard "$RC_SOURCE_SHA"
+# A file that a patch adds stays untracked after the reset; it is removed so that a re-run applies the set again.
+for p in "${RC_PATCHES[@]}"; do git apply --numstat "$RC_PATCH_DIR/$p" | cut -f3; done | sort -u | while read -r f; do
+    git cat-file -e "HEAD:$f" 2>/dev/null || rm -f "$f"
+done
 for p in "${RC_PATCHES[@]}"; do
     echo "Applying $p..."
     git apply --whitespace=nowarn "$RC_PATCH_DIR/$p"

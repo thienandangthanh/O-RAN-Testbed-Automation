@@ -1,0 +1,984 @@
+From 3eb44160563e9002fbb65090ccbd6f7e295ea20d Mon Sep 17 00:00:00 2001
+From: Thien An Dang Thanh <24854119+thienandangthanh@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 21:15:15 +0900
+Subject: [PATCH 3/3] Send DC PSCell Change control with an en-gNB-UEID
+
+rc now sends only CONTROL Service Style 5 "Dual Connectivity control",
+Control Action ID 3 "DC PSCell Change control" (E2SM-RC v03.00 7.6.6.1),
+the control a source en-gNB executes as an SN-initiated SN change. The RIC
+Control Header Format 1 carries UE ID en-gNB-UEID {m-eNB-UE-X2AP-ID,
+globalENB-ID {pLMN-Identity, macro eNB ID}} with no optional member; the
+gNB-UEID header path is removed. The message keeps RAN parameters
+1 > 2 > 3 > 4 with the APER NR CGI (8.4.6.3).
+
+The gRPC UeId gains enGNBUEID {mEnbUeX2apId, globalEnbPlmn,
+globalEnbMacroId} as field 2; rc.pb.go is regenerated with the pinned
+protoc 3.6.1 toolchain. The service validates every request through the
+nil-safe getters and refuses with InvalidArgument, sending nothing, when
+EnGnbUEID is absent, when GnbUEID is also set, when a member is out of
+range or malformed, or when the style/action is not 5/3. A unit test
+covers the admitted forms and each refusal.
+---
+ control/rcControl.go                       |  51 ++---
+ control/rcE2SmRc.go                        |  71 ++-----
+ control/rcService.go                       | 102 +++++++---
+ control/rcService_test.go                  |  70 +++++++
+ control/rcTypes.go                         |  25 +--
+ e2sm/wrapper.c                             | 213 +++++----------------
+ e2sm/wrapper.h                             |  31 +--
+ protocol/grpc/ricmsgcommrpc/proto/rc.proto |   8 +
+ protocol/grpc/ricmsgcommrpc/rc/rc.pb.go    | 149 +++++++++-----
+ 9 files changed, 353 insertions(+), 367 deletions(-)
+ create mode 100644 control/rcService_test.go
+
+diff --git a/control/rcControl.go b/control/rcControl.go
+index 8ce1bc5..b30bd5d 100644
+--- a/control/rcControl.go
++++ b/control/rcControl.go
+@@ -114,25 +114,9 @@ func HandlegRPCRICControlMsgReq(aPtrRicControlGrpcReq *rc.RicControlGrpcReq) {
+ 	lRicHoControlMsg := RicHoControlMsg{}
+ 	lRicHoControlMsg.RicControlGrpcReqPtr = aPtrRicControlGrpcReq
+ 
+-	lUEID := lRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID
+-	xapp.Logger.Debug("HandlegRPCRICControlMsgReq UEID = %v ", lUEID)
+-	//Mandatory parameters validation
+-	if lRicHoControlMsg.RicControlGrpcReqPtr.E2NodeID == "" ||
+-		lRicHoControlMsg.RicControlGrpcReqPtr.RICControlMessageData.TargetCellID == "" ||
+-		lRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID.GnbUEID.AmfUENGAPID < 0 ||
+-		lRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID.GnbUEID.Guami.PLMNIdentity == "" ||
+-		lRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID.GnbUEID.Guami.AMFRegionID == "" ||
+-		lRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID.GnbUEID.Guami.AMFSetID == "" ||
+-		lRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID.GnbUEID.Guami.AMFPointer == "" ||
+-		len(lRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID.GnbUEID.GNBCUUEF1APID) == 0 ||
+-		len(lRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID.GnbUEID.GNBCUCPUEE1APID) == 0 ||
+-		lRicHoControlMsg.RicControlGrpcReqPtr.PlmnID == "" ||
+-		lRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.ControlActionId < 0 ||
+-		lRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.ControlStyle < 0 ||
+-		lRicHoControlMsg.RicControlGrpcReqPtr.RICControlMessageData.RICControlCellTypeVal < 0 ||
+-		lRicHoControlMsg.RicControlGrpcReqPtr.RICE2APHeaderData.RICRequestorID < 0 ||
+-		lRicHoControlMsg.RicControlGrpcReqPtr.RICE2APHeaderData.RanFuncId < 0 {
+-		xapp.Logger.Error("Mandaroty parameters missing, dont send control request ")
++	// the gRPC service admitted the request; checked again here so that no member is ever dereferenced unchecked
++	if err := validateRicControlGrpcReq(lRicHoControlMsg.RicControlGrpcReqPtr); err != nil {
++		xapp.Logger.Error("RIC Control request not sent: %v", err)
+ 		return
+ 	}
+ 
+@@ -210,17 +194,20 @@ func (aRicHoControlMsg *RicHoControlMsg) SendRicControlRequest(aRequestSN int) (
+ 	var lRicControlActionID int64 = aRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.ControlActionId
+ 	lUEID := aRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID
+ 
+-	var ueId_data UEid
+-
+-	xapp.Logger.Debug("UEID:%v, ueId_data strct :%v", aRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID,
+-		ueId_data)
+-	ueId_data.amf_UE_NGAP_Id = lUEID.GnbUEID.AmfUENGAPID
+-	ueId_data.pLMNIdentitybuf = lUEID.GnbUEID.Guami.PLMNIdentity
+-        ueId_data.aMFRegionIDbuf = lUEID.GnbUEID.Guami.AMFRegionID
+-        ueId_data.aMFSetIDbuf = lUEID.GnbUEID.Guami.AMFSetID
+-        ueId_data.aMFPointerbuf = lUEID.GnbUEID.Guami.AMFPointer
+-        ueId_data.F1AP_id = lUEID.GnbUEID.GNBCUUEF1APID
+-        ueId_data.E1AP_id = lUEID.GnbUEID.GNBCUCPUEE1APID
++	// the en-gNB-UEID the gRPC service admitted: X2AP ID 0..4095, a 6-hex PLMN and a 5-hex macro eNB ID
++	lEnGnbUEID := lUEID.EnGnbUEID
++	lUePlmnId, err := hex.DecodeString(lEnGnbUEID.GlobalEnbPlmn)
++	if err != nil {
++		xapp.Logger.Error("EnGnbUEID.globalEnbPlmn %q: %v", lEnGnbUEID.GlobalEnbPlmn, err)
++		return err
++	}
++	lMacroEnbId, err := strconv.ParseUint(lEnGnbUEID.GlobalEnbMacroId, 16, 20)
++	if err != nil {
++		xapp.Logger.Error("EnGnbUEID.globalEnbMacroId %q: %v", lEnGnbUEID.GlobalEnbMacroId, err)
++		return err
++	}
++	ueId_data := EnGnbUeId{mEnbUeX2apId: lEnGnbUEID.MEnbUeX2ApId, plmnId: lUePlmnId, macroEnbId: uint32(lMacroEnbId)}
++	xapp.Logger.Debug("UEID:%v, en-gNB-UEID %+v", lUEID, ueId_data)
+ 
+ 	var lRicControlHeader []byte = make([]byte, 1024) //Check the Size
+ 	lRicControlHeaderEncoded, err := e2sm.SetRicControlHeader(lRicControlHeader, &ueId_data, lRicControlStyleType, lRicControlActionID)
+@@ -236,7 +223,7 @@ func (aRicHoControlMsg *RicHoControlMsg) SendRicControlRequest(aRequestSN int) (
+ 		}
+ 		fmt.Fprintf(os.Stderr, "\n")
+ 	}
+-	var lTargetPrimaryCell int64 = RIC_CONTROL_TARGET_PRIMARY_CELL
++	var lTargetPSCell int64 = RIC_CONTROL_TARGET_PSCELL
+ 	var lTargetCell int64 = RIC_CONTROL_TARGET_CELL
+ 	var lNrCGIOrECGI int64 = RIC_CONTROL_CGI_TYPE
+ 
+@@ -258,7 +245,7 @@ func (aRicHoControlMsg *RicHoControlMsg) SendRicControlRequest(aRequestSN int) (
+ 
+ 
+ 	var lRicControlMessage []byte = make([]byte, 1024)
+-	lRicControlMessageEncoded, err := e2sm.SetRicControlMessage(lRicControlMessage, lTargetPrimaryCell, lTargetCell, lNrCGIOrECGI, int64(lNrOrEUtraCellType), lPlmnId, lNRCellId)
++	lRicControlMessageEncoded, err := e2sm.SetRicControlMessage(lRicControlMessage, lTargetPSCell, lTargetCell, lNrCGIOrECGI, int64(lNrOrEUtraCellType), lPlmnId, lNRCellId)
+ 	if err != nil {
+ 		xapp.Logger.Error("SetRicControlMessage Failed: %v, UEID:%v", err, aRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID)
+ 		log.Printf("SetRicControlMessage Failed: %v, UEID:%v", err, aRicHoControlMsg.RicControlGrpcReqPtr.RICControlHeaderData.UEID)
+diff --git a/control/rcE2SmRc.go b/control/rcE2SmRc.go
+index 71561bd..ad33e32 100644
+--- a/control/rcE2SmRc.go
++++ b/control/rcE2SmRc.go
+@@ -14,75 +14,28 @@ import (
+ 	_ "log"
+ 	_"encoding/binary"
+ 	"encoding/hex"
+-	"strings"
+ 	//"strconv"
+-	"fmt"
+ )
+ 
+ type E2sm struct {
+ }
+ 
+-func (c *E2sm) SetRicControlHeader(buffer []byte, ueIdData *UEid, ricControlStyleType int64, ricControlActionID int64) (newBuffer []byte, err error) {
++// SetRicControlHeader encodes RIC Control Header Format 1 (E2SM-RC 9.2.1.6.1) with UE ID = en-gNB-UEID
++// {m-eNB-UE-X2AP-ID, globalENB-ID {pLMN-Identity, macro eNB ID}} and no optional member, and the control style and
++// action.
++func (c *E2sm) SetRicControlHeader(buffer []byte, ueIdData *EnGnbUeId, ricControlStyleType int64, ricControlActionID int64) (newBuffer []byte, err error) {
+ 
+ 	xapp.Logger.Info("SetRicControlHeader Enter \n")
+-	cptr := unsafe.Pointer(&buffer[0])
+-	//cptr_ueIDbuf := unsafe.Pointer(&ueIDbuf[0])
+-
+-	lplmnIdBuf := strings.Join(strings.Fields(ueIdData.pLMNIdentitybuf), "")
+-	/*
+-	lIntvar, _ := strconv.Atoi(lplmnIdBuf)
+-	xapp.Logger.Info("lIntvar = %d\n", lIntvar)
+-
+-	lIntegerByte := ConverIntegerToByte(lIntvar)
+-	//ml.MavLog(ml.INFO, lTransId, " lIntegerByte = %v\n", lIntegerByte)
+-	xapp.Logger.Info(" lIntegerByte = %v\n", lIntegerByte)
+-        lOutByte := get_bytepack_plmnId(lIntegerByte)
+-	*/
+-	lOutByte, err := hex.DecodeString(lplmnIdBuf)
+-	if err != nil {
+-		panic(err)
++	if len(buffer) == 0 || ueIdData == nil || len(ueIdData.plmnId) != 3 || ueIdData.mEnbUeX2apId < 0 ||
++		ueIdData.mEnbUeX2apId > 4095 || ueIdData.macroEnbId >= 1<<20 {
++		return make([]byte, 0), errors.New("en-gNB-UEID needs an X2AP ID 0..4095, a 3-octet PLMN Identity and a 20-bit macro eNB ID")
+ 	}
+-	fmt.Println(lOutByte)
+-	fmt.Printf("% x", lOutByte)
+-        xapp.Logger.Info("lOutByte Len:%d\n", len(lOutByte))
+-        xapp.Logger.Info("lOutByte = %02X\n", lOutByte)
+-	cptrRanParameterValue := unsafe.Pointer(&lOutByte[0])
+-	
+-
+-		pLMNIdentity := C.CString(ueIdData.pLMNIdentitybuf)
+-	defer C.free(unsafe.Pointer(pLMNIdentity))
+-        	pLMNIdentity_size := C.size_t(len(ueIdData.pLMNIdentitybuf))
+-        	aMFRegionID := C.CString(ueIdData.aMFRegionIDbuf)
+-	defer C.free(unsafe.Pointer(aMFRegionID))
+-        	aMFSetID := C.CString(ueIdData.aMFSetIDbuf)
+-	defer C.free(unsafe.Pointer(aMFSetID))
+-        	aMFPointer := C.CString(ueIdData.aMFPointerbuf)
+-	defer C.free(unsafe.Pointer(aMFPointer))
+-
+-	uEID_C := C.struct_uEID{
+-                amf_UE_NGAP_Id: C.long(ueIdData.amf_UE_NGAP_Id),
+-                pLMNIdentity : pLMNIdentity,
+-                pLMNIdentity_size : pLMNIdentity_size,
+-                aMFRegionID : aMFRegionID,
+-                aMFRegionID_size : 1, //AMFRegionID ::= BIT STRING (SIZE(8))
+-                aMFSetID : aMFSetID,
+-                aMFSetID_size: 2, //BIT STRING (SIZE(10))
+-                aMFPointer : aMFPointer,
+-                aMFPointer_size : 1,  //BIT STRING (SIZE(6))
+-        }
+-
+-	xapp.Logger.Debug("uEID_C amf_UE_NGAP_Id  = %l",uEID_C.amf_UE_NGAP_Id)
+-	xapp.Logger.Debug("uEID_C pLMNIdentity = %s",uEID_C.pLMNIdentity)
+-	xapp.Logger.Debug("uEID_C aMFRegionID %s = ",uEID_C.aMFRegionID)
+-	xapp.Logger.Debug("uEID_C aMFSetID  %s = ",uEID_C.aMFSetID)
+-	xapp.Logger.Debug("uEID_C aMFPointer %s = ",uEID_C.aMFPointer)
+-
+-	size := C.e2sm_encode_ric_control_header(cptr, C.size_t(len(buffer)),&uEID_C ,(*C.long)(&ueIdData.F1AP_id[0]),C.size_t(len(ueIdData.F1AP_id)),(*C.long)(&ueIdData.E1AP_id[0]),C.size_t(len(ueIdData.E1AP_id)),(C.long)(ricControlStyleType), (C.long)(ricControlActionID), cptrRanParameterValue,C.size_t(len(lOutByte)))
+-
+-	//size := C.e2sm_encode_ric_control_header(cptr, C.size_t(len(buffer)),&uEID_C ,(*C.long)(&ueIdData.F1AP_id[0]),(*C.long)(&ueIdData.E1AP_id[0]),(C.long)(ricControlStyleType), (C.long)(ricControlActionID))
+-	
++	cptr := unsafe.Pointer(&buffer[0])
++	size := C.e2sm_encode_ric_control_header(cptr, C.size_t(len(buffer)), C.long(ueIdData.mEnbUeX2apId),
++		unsafe.Pointer(&ueIdData.plmnId[0]), C.size_t(len(ueIdData.plmnId)), C.ulong(ueIdData.macroEnbId),
++		C.long(ricControlStyleType), C.long(ricControlActionID))
+ 	if size < 0 {
+-		return make([]byte, 0), errors.New("e2sm wrapper is unable to set EventTriggerDefinition due to wrong or invalid input")
++		return make([]byte, 0), errors.New("e2sm wrapper is unable to encode the RIC Control Header")
+ 	}
+ 	newBuffer = C.GoBytes(cptr, (C.int(size)+7)/8)
+ 	xapp.Logger.Info("E2sm SetRicControlHeader is success")
+diff --git a/control/rcService.go b/control/rcService.go
+index 9a843f1..a13ec1f 100644
+--- a/control/rcService.go
++++ b/control/rcService.go
+@@ -1,6 +1,8 @@
+ package control
+ 
+ import (
++	"errors"
++	"fmt"
+ 	"log"
+ 	"regexp"
+ 	"runtime/debug"
+@@ -15,12 +17,66 @@ import (
+ )
+ 
+ // TargetCellID is the TS xApp's cell key: the 36-bit NR Cell Identity in 9 hex digits followed by its 4 unused
+-// bits as hex 0. plmnID is the E2 node's PLMN Identity, 3 octets in hex (3GPP TS 38.413 9.3.3.5).
++// bits as hex 0. plmnID is the E2 node's PLMN Identity, 3 octets in hex (3GPP TS 38.413 9.3.3.5). The en-gNB-UEID
++// members are the MeNB UE X2AP ID (INTEGER (0..4095), 3GPP TS 36.423 9.2.24) and the master eNB's Global eNB ID:
++// its PLMN Identity in 6 hex digits and its 20-bit macro eNB ID in 5 hex digits.
+ var (
+ 	targetCellKeyRe = regexp.MustCompile(`^[0-9A-F]{9}0$`)
+ 	plmnIDRe        = regexp.MustCompile(`^[0-9A-Fa-f]{6}$`)
++	macroEnbIDRe    = regexp.MustCompile(`^[0-9A-Fa-f]{5}$`)
+ )
+ 
++const maxEnbUeX2apID = 4095
++
++// validateRicControlGrpcReq admits only a CONTROL Style 5 action 3 request (DC PSCell Change control, E2SM-RC
++// v03.00 7.6.6.1) whose UE ID is exactly an en-gNB-UEID with every member in range, addressed to an E2 node and
++// naming an NR target cell. It reads every message through the nil-safe getters, so a request with any member
++// missing is refused instead of dereferencing it. The error names the first problem found.
++func validateRicControlGrpcReq(r *rc.RicControlGrpcReq) error {
++	if r == nil {
++		return errors.New("no request")
++	}
++	if r.GetE2NodeID() == "" || r.GetRanName() == "" || !plmnIDRe.MatchString(r.GetPlmnID()) {
++		return errors.New("e2NodeID and ranName must be set and plmnID must be 6 hex digits")
++	}
++	e2ap := r.GetRICE2APHeaderData()
++	if e2ap == nil || e2ap.GetRanFuncId() < 0 || e2ap.GetRICRequestorID() < 0 {
++		return errors.New("RICE2APHeaderData with a non-negative RanFuncId and RICRequestorID is required")
++	}
++	hdr := r.GetRICControlHeaderData()
++	if hdr == nil {
++		return errors.New("RICControlHeaderData is required")
++	}
++	if hdr.GetControlStyle() != RIC_CONTROL_STYLE_DUAL_CONNECTIVITY ||
++		hdr.GetControlActionId() != RIC_CONTROL_ACTION_DC_PSCELL_CHANGE {
++		return fmt.Errorf("ControlStyle %d / ControlActionId %d: only style 5 / action 3 (DC PSCell Change control) is sent",
++			hdr.GetControlStyle(), hdr.GetControlActionId())
++	}
++	ueID := hdr.GetUEID()
++	if ueID.GetGnbUEID() != nil {
++		return errors.New("UEID must carry EnGnbUEID only, not GnbUEID")
++	}
++	en := ueID.GetEnGnbUEID()
++	if en == nil {
++		return errors.New("UEID.EnGnbUEID is required")
++	}
++	if en.GetMEnbUeX2ApId() < 0 || en.GetMEnbUeX2ApId() > maxEnbUeX2apID {
++		return fmt.Errorf("EnGnbUEID.mEnbUeX2apId %d is outside 0..%d", en.GetMEnbUeX2ApId(), maxEnbUeX2apID)
++	}
++	if !plmnIDRe.MatchString(en.GetGlobalEnbPlmn()) {
++		return fmt.Errorf("EnGnbUEID.globalEnbPlmn %q is not 6 hex digits", en.GetGlobalEnbPlmn())
++	}
++	if !macroEnbIDRe.MatchString(en.GetGlobalEnbMacroId()) {
++		return fmt.Errorf("EnGnbUEID.globalEnbMacroId %q is not 5 hex digits (a 20-bit macro eNB ID)",
++			en.GetGlobalEnbMacroId())
++	}
++	msg := r.GetRICControlMessageData()
++	if msg == nil || !targetCellKeyRe.MatchString(msg.GetTargetCellID()) {
++		return errors.New("TargetCellID must be 9 hex digits of NR Cell Identity followed by 0")
++	}
++	return nil
++}
++
+ func (aPtrSendMsgSrv *RCControlServer) SendRICControlReqServiceGrpc(aCtx context.Context, aPtrRicControlGrpcReq *rc.RicControlGrpcReq) (*rc.RicControlGrpcRsp, error) {
+ 
+ 	xapp.Logger.Info("SendRICControlReqServiceGrpc Enter ")
+@@ -38,36 +94,22 @@ func (aPtrSendMsgSrv *RCControlServer) SendRICControlReqServiceGrpc(aCtx context
+ 	var lRicControlGrpcRsp rc.RicControlGrpcRsp
+ 	lRicControlGrpcRsp.RspCode = GRPC_ERROR
+ 	lRicControlGrpcRsp.Description = "The client specified an invalid argument. or some parameters are missing "
+-	if aPtrRicControlGrpcReq == nil {
+-		xapp.Logger.Error("Received nil data from Send error rsp")
+-	} else {
+-		//if len(aPtrRicControlGrpcReq.E2NodeID) == 0 || len(aPtrRicControlGrpcReq.RICControlMessageData.TargetCellID) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.PLMNIdentity) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.AMFRegionID) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.AMFSetID) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.AMFPointer) == 0 || len(aPtrRicControlGrpcReq.RanName) == 0 || len(aPtrRicControlGrpcReq.PlmnID) == 0 {
+-		if len(aPtrRicControlGrpcReq.E2NodeID) == 0 || len(aPtrRicControlGrpcReq.RICControlMessageData.TargetCellID) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.PLMNIdentity) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.AMFRegionID) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.AMFSetID) == 0 || len(aPtrRicControlGrpcReq.RICControlHeaderData.UEID.GnbUEID.Guami.AMFPointer) == 0 || len(aPtrRicControlGrpcReq.RanName) == 0 || len(aPtrRicControlGrpcReq.PlmnID) == 0 {
+-			xapp.Logger.Error("Mandatory parameters are not received send Error rsp to client,no control Request will be initiated ")
+-		} else if !targetCellKeyRe.MatchString(aPtrRicControlGrpcReq.RICControlMessageData.TargetCellID) ||
+-			!plmnIDRe.MatchString(aPtrRicControlGrpcReq.PlmnID) {
+-			xapp.Logger.Error("TargetCellID %q or plmnID %q is not an NR cell key / PLMN Identity, no control Request will be initiated",
+-				aPtrRicControlGrpcReq.RICControlMessageData.TargetCellID, aPtrRicControlGrpcReq.PlmnID)
+-			return nil, status.Errorf(codes.InvalidArgument,
+-				"TargetCellID must be 9 hex digits of NR Cell Identity followed by 0, plmnID 6 hex digits")
+-		} else {
+-			xapp.Logger.Info("GRPC Control request validated, initiate Control Request to RAN")
+-			gChan_RicControlReq_handle <- aPtrRicControlGrpcReq
+-			xapp.Logger.Debug("Received RIC Control Request with RicRequestorID: %d", aPtrRicControlGrpcReq.RICE2APHeaderData.RICRequestorID)
+-			xapp.Logger.Debug("Received RIC Control Request with RicActionId: %d", aPtrRicControlGrpcReq.RICE2APHeaderData.RanFuncId)
+-
+-			xapp.Logger.Debug("Received RIC Control Request with UEID: %s", aPtrRicControlGrpcReq.RICControlHeaderData.UEID)
+-			xapp.Logger.Debug("Received RIC Control Request with ControlStyle: %d", aPtrRicControlGrpcReq.RICControlHeaderData.ControlStyle)
+-			xapp.Logger.Debug("Received RIC Control Request with ControlActionId: %d", aPtrRicControlGrpcReq.RICControlHeaderData.ControlActionId)
+-
+-			xapp.Logger.Debug("Received RIC Control Request with CellType: %d", aPtrRicControlGrpcReq.RICControlMessageData.RICControlCellTypeVal)
+-			xapp.Logger.Debug("Received RIC Control Request with TargetCellID: %s", aPtrRicControlGrpcReq.RICControlMessageData.TargetCellID)
+-			xapp.Logger.Debug("Received RIC Control Request with RanName: %s", aPtrRicControlGrpcReq.RanName)
+-			lRicControlGrpcRsp.RspCode = GRPC_SUCCESS //int32(lGrpcRspStatusCode)
+-			lRicControlGrpcRsp.Description = "Success Response"
+-			xapp.Logger.Debug("RICHOCONTROL_EVENT: Success Response sent with  RspCode:%d, Description:%s", lRicControlGrpcRsp.RspCode, lRicControlGrpcRsp.Description)
+-		}
++	if err := validateRicControlGrpcReq(aPtrRicControlGrpcReq); err != nil {
++		xapp.Logger.Error("RIC Control request refused, no control Request will be initiated: %v", err)
++		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+ 	}
++	xapp.Logger.Info("GRPC Control request validated, initiate Control Request to RAN")
++	gChan_RicControlReq_handle <- aPtrRicControlGrpcReq
++	xapp.Logger.Debug("Received RIC Control Request with RicRequestorID: %d", aPtrRicControlGrpcReq.RICE2APHeaderData.RICRequestorID)
++	xapp.Logger.Debug("Received RIC Control Request with RanFuncId: %d", aPtrRicControlGrpcReq.RICE2APHeaderData.RanFuncId)
++	xapp.Logger.Debug("Received RIC Control Request with UEID: %s", aPtrRicControlGrpcReq.RICControlHeaderData.UEID)
++	xapp.Logger.Debug("Received RIC Control Request with ControlStyle: %d", aPtrRicControlGrpcReq.RICControlHeaderData.ControlStyle)
++	xapp.Logger.Debug("Received RIC Control Request with ControlActionId: %d", aPtrRicControlGrpcReq.RICControlHeaderData.ControlActionId)
++	xapp.Logger.Debug("Received RIC Control Request with CellType: %d", aPtrRicControlGrpcReq.RICControlMessageData.RICControlCellTypeVal)
++	xapp.Logger.Debug("Received RIC Control Request with TargetCellID: %s", aPtrRicControlGrpcReq.RICControlMessageData.TargetCellID)
++	xapp.Logger.Debug("Received RIC Control Request with RanName: %s", aPtrRicControlGrpcReq.RanName)
++	lRicControlGrpcRsp.RspCode = GRPC_SUCCESS
++	lRicControlGrpcRsp.Description = "Success Response"
+ 
+ 	xapp.Logger.Info("RICHOCONTROL_EVENT: Response sent with  RspCode:%d, Description:%s", lRicControlGrpcRsp.RspCode, lRicControlGrpcRsp.Description)
+ 
+diff --git a/control/rcService_test.go b/control/rcService_test.go
+new file mode 100644
+index 0000000..6bfd4c2
+--- /dev/null
++++ b/control/rcService_test.go
+@@ -0,0 +1,70 @@
++package control
++
++import (
++	"strings"
++	"testing"
++
++	"gerrit.o-ran-sc.org/r/ric-app/rc/protocol/grpc/ricmsgcommrpc/rc"
++)
++
++// validReq is a DC PSCell Change control (style 5, action 3) for the UE with MeNB UE X2AP ID 5 at macro eNB 1,
++// sent to en-gNB 2 and naming gNB 3's NR cell, as the TS xApp builds it.
++func validReq() *rc.RicControlGrpcReq {
++	return &rc.RicControlGrpcReq{
++		E2NodeID:          "00000002",
++		PlmnID:            "00F110",
++		RanName:           "en_gnb_001_001_00000002",
++		RICE2APHeaderData: &rc.RICE2APHeader{RanFuncId: 3, RICRequestorID: 1},
++		RICControlHeaderData: &rc.RICControlHeader{ControlStyle: 5, ControlActionId: 3,
++			UEID: &rc.UeId{EnGnbUEID: &rc.EnGNBUEID{MEnbUeX2ApId: 5, GlobalEnbPlmn: "00F110", GlobalEnbMacroId: "00001"}}},
++		RICControlMessageData: &rc.RICControlMessage{TargetCellID: "0000000030"},
++	}
++}
++
++func TestValidateAdmitsStyle5Action3WithEnGnbUEID(t *testing.T) {
++	if err := validateRicControlGrpcReq(validReq()); err != nil {
++		t.Fatalf("valid request refused: %v", err)
++	}
++	r := validReq()
++	r.RICControlHeaderData.UEID.EnGnbUEID = &rc.EnGNBUEID{MEnbUeX2ApId: 4095, GlobalEnbPlmn: "00f110", GlobalEnbMacroId: "fffff"}
++	if err := validateRicControlGrpcReq(r); err != nil {
++		t.Fatalf("X2AP ID 4095 / macro eNB ID FFFFF refused: %v", err)
++	}
++}
++
++func TestValidateRefusesWithoutDereferencingNilMembers(t *testing.T) {
++	cases := map[string]func(r *rc.RicControlGrpcReq){
++		"nil request":    nil,
++		"no UEID":        func(r *rc.RicControlGrpcReq) { r.RICControlHeaderData.UEID = nil },
++		"neither UE ID":  func(r *rc.RicControlGrpcReq) { r.RICControlHeaderData.UEID = &rc.UeId{} },
++		"GnbUEID only":   func(r *rc.RicControlGrpcReq) { r.RICControlHeaderData.UEID = &rc.UeId{GnbUEID: &rc.GNBUEID{}} },
++		"both UE IDs":    func(r *rc.RicControlGrpcReq) { r.RICControlHeaderData.UEID.GnbUEID = &rc.GNBUEID{} },
++		"no header":      func(r *rc.RicControlGrpcReq) { r.RICControlHeaderData = nil },
++		"no message":     func(r *rc.RicControlGrpcReq) { r.RICControlMessageData = nil },
++		"no E2AP header": func(r *rc.RicControlGrpcReq) { r.RICE2APHeaderData = nil },
++		"style 3 action 1": func(r *rc.RicControlGrpcReq) {
++			r.RICControlHeaderData.ControlStyle, r.RICControlHeaderData.ControlActionId = 3, 1
++		},
++		"style 5 action 4":         func(r *rc.RicControlGrpcReq) { r.RICControlHeaderData.ControlActionId = 4 },
++		"X2AP ID 4096":             func(r *rc.RicControlGrpcReq) { r.RICControlHeaderData.UEID.EnGnbUEID.MEnbUeX2ApId = 4096 },
++		"X2AP ID -1":               func(r *rc.RicControlGrpcReq) { r.RICControlHeaderData.UEID.EnGnbUEID.MEnbUeX2ApId = -1 },
++		"PLMN of 5 digits":         func(r *rc.RicControlGrpcReq) { r.RICControlHeaderData.UEID.EnGnbUEID.GlobalEnbPlmn = "00F11" },
++		"PLMN not hex":             func(r *rc.RicControlGrpcReq) { r.RICControlHeaderData.UEID.EnGnbUEID.GlobalEnbPlmn = "00F1G0" },
++		"macro eNB ID of 6 digits": func(r *rc.RicControlGrpcReq) { r.RICControlHeaderData.UEID.EnGnbUEID.GlobalEnbMacroId = "100000" },
++		"macro eNB ID empty":       func(r *rc.RicControlGrpcReq) { r.RICControlHeaderData.UEID.EnGnbUEID.GlobalEnbMacroId = "" },
++		"target not a cell key":    func(r *rc.RicControlGrpcReq) { r.RICControlMessageData.TargetCellID = "0000000303" },
++		"no E2 node":               func(r *rc.RicControlGrpcReq) { r.E2NodeID = "" },
++		"no RAN name":              func(r *rc.RicControlGrpcReq) { r.RanName = "" },
++	}
++	for name, mutate := range cases {
++		var r *rc.RicControlGrpcReq
++		if mutate != nil {
++			r = validReq()
++			mutate(r)
++		}
++		err := validateRicControlGrpcReq(r)
++		if err == nil || strings.TrimSpace(err.Error()) == "" {
++			t.Errorf("%s: admitted", name)
++		}
++	}
++}
+diff --git a/control/rcTypes.go b/control/rcTypes.go
+index 4ce92e3..fa29da0 100644
+--- a/control/rcTypes.go
++++ b/control/rcTypes.go
+@@ -8,12 +8,17 @@ import (
+ )
+ 
+ const MAX_CONTROL_REQ_ATTEMPTS = 2
+-const RIC_CONTROL_STYLE_TYPE = 3
+-const RIC_CONTROL_ACTION_ID = 1
++// E2SM-RC v03.00 7.6.6.1: CONTROL Service Style 5 "Dual Connectivity control", Control Action ID 3 "DC PSCell
++// Change control". It is the only control rc sends: header Format 1 with an en-gNB-UEID, message Format 1 with the
++// RAN parameters of 8.4.6.3 below.
++const RIC_CONTROL_STYLE_DUAL_CONNECTIVITY = 5
++const RIC_CONTROL_ACTION_DC_PSCELL_CHANGE = 3
+ 
+ const TIME_NANOSEC = 1000000000
+ 
+-const RIC_CONTROL_TARGET_PRIMARY_CELL = 1
++// RAN parameter IDs of action 3 (E2SM-RC v03.00 8.4.6.3): 1 Target PSCell ID > 2 CHOICE Target Cell > 3 NR Cell >
++// 4 NR CGI.
++const RIC_CONTROL_TARGET_PSCELL = 1
+ const RIC_CONTROL_TARGET_CELL = 2
+ const RIC_CONTROL_CELL_TYPE = 3
+ const RIC_CONTROL_CGI_TYPE = 4
+@@ -35,14 +40,12 @@ type RicHoControlMsg struct {
+ }
+ 
+ 
+-type UEid struct {
+-        amf_UE_NGAP_Id   int64
+-        pLMNIdentitybuf  string
+-        aMFRegionIDbuf   string
+-        aMFSetIDbuf      string
+-        aMFPointerbuf    string
+-        F1AP_id         []int64
+-        E1AP_id         []int64
++// EnGnbUeId is the en-gNB-UEID of the RIC Control Header (E2SM common UEID-EN-GNB): the MeNB UE X2AP ID and the
++// Global eNB ID {PLMN Identity, macro eNB ID} of the master eNB. Every optional member is absent.
++type EnGnbUeId struct {
++	mEnbUeX2apId int64  // ENB-UE-X2AP-ID INTEGER (0..4095) (3GPP TS 36.423 9.2.24)
++	plmnId       []byte // PLMN Identity, 3 octets
++	macroEnbId   uint32 // macro eNB ID, BIT STRING (SIZE(20))
+ }
+ 
+ type ValueInt int64
+diff --git a/e2sm/wrapper.c b/e2sm/wrapper.c
+index 94eb197..5e9fc5c 100755
+--- a/e2sm/wrapper.c
++++ b/e2sm/wrapper.c
+@@ -2,176 +2,65 @@
+ #include "wrapper.h"
+ #include "OCTET_STRING.h"
+ 
+-ssize_t e2sm_encode_ric_control_header(void *buffer, size_t buf_size,struct uEID *inUEID,long f1AP[],size_t f1AP_len,long e1AP[],size_t e1Ap_len,long ricControlStyleType, long ricControlActionID, void* plmnId, size_t  plmnIdSize)
++ssize_t e2sm_encode_ric_control_header(void *buffer, size_t buf_size, long mEnbUeX2apId, const void *plmnId,
++				size_t plmnIdSize, unsigned long macroEnbId, long ricControlStyleType,
++				long ricControlActionID)
+ {
+-        fprintf(stderr,"e2SM wrapper function Entered\n");	
+-	fprintf(stderr,"plmn Size = %ld and aMFRegionID Size = %ld and aMFSetID_size = %ld and aMFPointer_size = %ld \n", inUEID->pLMNIdentity_size,inUEID->aMFRegionID_size,inUEID->aMFSetID_size,inUEID->aMFPointer_size);
+-
+-        E2SM_RC_ControlHeader_t *controlHeaderIE = (E2SM_RC_ControlHeader_t *)calloc(1, sizeof(E2SM_RC_ControlHeader_t));
+-        if(!controlHeaderIE)
+-        {
+-                fprintf(stderr, "alloc E2SM_RC_ControlHeader failed\n");
+-                   return -1;
+-        }
+-
+-        controlHeaderIE->ric_controlHeader_formats.present = E2SM_RC_ControlHeader__ric_controlHeader_formats_PR_controlHeader_Format1;
+-        //E2SM_RC_ControlHeader_Format1_t  *controlHeader_Fmt1 = (E2SM_RC_ControlHeader_Format1_t *)calloc(1, sizeof(E2SM_RC_ControlHeader_Format1_t));
+-	E2SM_RC_ControlHeader_Format1_t  *controlHeader_Fmt1 = NULL;
+-	controlHeaderIE->ric_controlHeader_formats.choice.controlHeader_Format1 = (E2SM_RC_ControlHeader_Format1_t *)calloc(1, sizeof(E2SM_RC_ControlHeader_Format1_t));
+-	controlHeader_Fmt1 = controlHeaderIE->ric_controlHeader_formats.choice.controlHeader_Format1;
+-        if(!controlHeader_Fmt1)
+-        {
+-                fprintf(stderr, "alloc E2SM_RC_ControlHeader failed\n");
+-		ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
+-                return -1;
+-        }
+-       
+-	controlHeader_Fmt1->ueID.present = UEID_PR_gNB_UEID;
+-	controlHeader_Fmt1->ueID.choice.gNB_UEID = (UEID_GNB_t *)calloc(1,sizeof(UEID_GNB_t));
+-	if(! controlHeader_Fmt1->ueID.choice.gNB_UEID)
+-	{
+-		ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
+-		fprintf(stderr, "alloc gNB_UEID failed\n");
+-                return -1;
++	if (!buffer || !plmnId || plmnIdSize != 3 || mEnbUeX2apId < 0 || mEnbUeX2apId > 4095 || macroEnbId > 0xFFFFFUL) {
++		fprintf(stderr, "e2sm_encode_ric_control_header: en-gNB-UEID out of range\n");
++		return -1;
+ 	}
+-
+-	asn_long2INTEGER(&controlHeader_Fmt1->ueID.choice.gNB_UEID->amf_UE_NGAP_ID,inUEID->amf_UE_NGAP_Id);
+-
+-	fprintf(stderr, "e2sm_encode_ric_control_header amf_UE_NGAP_ID encoded \n");
+-	
+-	//OCTET_STRING_fromBuf(&controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.pLMNIdentity,inUEID->pLMNIdentity, inUEID->pLMNIdentity_size);
+-
+-	OCTET_STRING_fromBuf(&controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.pLMNIdentity, plmnId,plmnIdSize);
+-	fprintf(stderr, "e2smrc_encode_ric_control_header pLMNIdentity encoded \n");
+-
+-	controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFRegionID.buf = (uint8_t*)calloc(1,inUEID->aMFRegionID_size);
+-        if(!controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFRegionID.buf)
+-        {
+-                ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
+-                fprintf(stderr, "alloc aMFRegionID Value failed\n");
+-                return -1;
+-        }
+-	controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFRegionID.size = 1;//inUEID->aMFRegionID_size;
+-	 int decimal_num= (int)strtol(inUEID->aMFRegionID, NULL, 2);
+-	 memcpy(controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFRegionID.buf, (char*)&decimal_num,sizeof(unsigned int));
+-        //AMFR->size=1;
+-        controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFRegionID.bits_unused=0;
+-	//controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFRegionID.buf[0] = inUEID->aMFRegionID && 0XFF;
+-	//controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFRegionID.buf[0] = *(inUEID->aMFRegionID ) & 0XFF;
+-	//memcpy(controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFRegionID.buf,inUEID->aMFRegionID,inUEID->aMFRegionID_size);
+-
+-	controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFSetID.buf = (uint8_t*)calloc(1, inUEID->aMFSetID_size);
+-        if(!controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFSetID.buf)
+-        {
+-                ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
+-                fprintf(stderr, "alloc aMFSetID Value failed\n");
+-                return -1;
+-        }
+-	controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFSetID.size = inUEID->aMFSetID_size;
+-	//controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFSetID.buf[0] = (inUEID->aMFSetID && 0xFF00) >> 8;
+-	//controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFSetID.buf[1] = inUEID->aMFSetID && 0XFF00 && 0X00FF;
+-	controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFSetID.buf[0] = (*(inUEID->aMFSetID) & 0xFFC0) >> 8;
+-	controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFSetID.bits_unused = 6;
+-
+-
+-	controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFPointer.buf = (uint8_t*)calloc(1, inUEID->aMFPointer_size);
+-        if(!controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFPointer.buf)
+-        {
+-                ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
+-                fprintf(stderr, "alloc aMFPointer Value failed\n");
+-                return -1;
+-        }
+-
+-	controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFPointer.size = 1;//inUEID->aMFPointer_size;
+-	//controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFPointer.buf[0] = inUEID->aMFPointer && 0XFF;
+-	//controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFPointer.buf[0] = (*(inUEID->aMFPointer) & 0xFC) >> 2;
+-	 int decimal_num3= (int)strtol(inUEID->aMFPointer, NULL, 2);
+-	 decimal_num3=decimal_num3<<2;
+-         memcpy(controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFPointer.buf, (char*)&decimal_num3,sizeof(unsigned int));
+-
+-	controlHeader_Fmt1->ueID.choice.gNB_UEID->guami.aMFPointer.bits_unused = 2;
+-
+-
+-	controlHeader_Fmt1->ueID.choice.gNB_UEID->gNB_CU_UE_F1AP_ID_List = (UEID_GNB_CU_F1AP_ID_List_t *)calloc(1,sizeof(UEID_GNB_CU_F1AP_ID_List_t));
+-	if(! controlHeader_Fmt1->ueID.choice.gNB_UEID->gNB_CU_UE_F1AP_ID_List)
+-        {
+-                fprintf(stderr, "alloc gNB_CU_CP_UE_E1AP_ID_list failed\n");
++	E2SM_RC_ControlHeader_t *controlHeaderIE = (E2SM_RC_ControlHeader_t *)calloc(1, sizeof(E2SM_RC_ControlHeader_t));
++	if (!controlHeaderIE) {
++		fprintf(stderr, "alloc E2SM_RC_ControlHeader failed\n");
++		return -1;
++	}
++	controlHeaderIE->ric_controlHeader_formats.present = E2SM_RC_ControlHeader__ric_controlHeader_formats_PR_controlHeader_Format1;
++	E2SM_RC_ControlHeader_Format1_t *controlHeader_Fmt1 = (E2SM_RC_ControlHeader_Format1_t *)calloc(1, sizeof(E2SM_RC_ControlHeader_Format1_t));
++	controlHeaderIE->ric_controlHeader_formats.choice.controlHeader_Format1 = controlHeader_Fmt1;
++	if (!controlHeader_Fmt1) {
++		fprintf(stderr, "alloc E2SM_RC_ControlHeader_Format1 failed\n");
+ 		ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
+-                return -1;
+-        }
+-	//f1AP is an array of data
+-	//int n = sizeof(f1AP)/sizeof(long int);
+-
+-	for(int i =0; i < f1AP_len; i++)
+-	{
+-		UEID_GNB_CU_CP_F1AP_ID_Item_t *F1AP_ID_Item = (UEID_GNB_CU_CP_F1AP_ID_Item_t *)calloc (1, sizeof(UEID_GNB_CU_CP_F1AP_ID_Item_t ));
+-		if(! F1AP_ID_Item)
+-		{
+-                	fprintf(stderr, "alloc UEID_GNB_CU_CP_F1AP_ID_Item failed\n");
+-			ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
+-                	return -1;
+-		} 
+-		F1AP_ID_Item->gNB_CU_UE_F1AP_ID  = f1AP[i];
+-		fprintf(stderr, "F1AP_id %d =%lu\n",i,*((unsigned long *) F1AP_id +i ));
+-		ASN_SEQUENCE_ADD(&controlHeader_Fmt1->ueID.choice.gNB_UEID->gNB_CU_UE_F1AP_ID_List->list,F1AP_ID_Item);
++		return -1;
+ 	}
+-	//F1AP_ID_Item->gNB_CU_UE_F1AP_ID  = f1AP[0];
+-	//ASN_SEQUENCE_ADD(&controlHeader_Fmt1->ueID.choice.gNB_UEID->gNB_CU_UE_F1AP_ID_List->list,F1AP_ID_Item);
+-
+-	
+-	controlHeader_Fmt1->ueID.choice.gNB_UEID->gNB_CU_CP_UE_E1AP_ID_List = (UEID_GNB_CU_CP_E1AP_ID_List_t *)calloc(1,sizeof(UEID_GNB_CU_CP_E1AP_ID_List_t));
+-
+-	if(! controlHeader_Fmt1->ueID.choice.gNB_UEID->gNB_CU_CP_UE_E1AP_ID_List)
+-	{
+-		fprintf(stderr, "alloc gNB_CU_CP_UE_E1AP_ID_list failed\n");
++	controlHeader_Fmt1->ueID.present = UEID_PR_en_gNB_UEID;
++	UEID_EN_GNB_t *ue = (UEID_EN_GNB_t *)calloc(1, sizeof(UEID_EN_GNB_t));
++	controlHeader_Fmt1->ueID.choice.en_gNB_UEID = ue;
++	if (!ue) {
++		fprintf(stderr, "alloc en_gNB_UEID failed\n");
+ 		ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
+-                return -1;
++		return -1;
+ 	}
+-
+-	
+-	//n = sizeof(e1AP)/sizeof(long int);
+-	for(int i =0; i < e1Ap_len; i++)
+-	{
+-		UEID_GNB_CU_CP_E1AP_ID_Item_t *E1AP_ID_Item = (UEID_GNB_CU_CP_E1AP_ID_Item_t *)calloc (1, sizeof(UEID_GNB_CU_CP_E1AP_ID_Item_t ));
+-        	if(! E1AP_ID_Item)
+-        	{
+-                	fprintf(stderr, "alloc UEID_GNB_CU_CP_E1AP_ID_Item failed\n");
+-			ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
+-                	return -1;
+-
+-        	}
+-		E1AP_ID_Item->gNB_CU_CP_UE_E1AP_ID = e1AP[i];
+-         	ASN_SEQUENCE_ADD(&controlHeader_Fmt1->ueID.choice.gNB_UEID->gNB_CU_CP_UE_E1AP_ID_List->list,E1AP_ID_Item);
+-	//E1AP_ID_Item->gNB_CU_CP_UE_E1AP_ID = (*(unsigned long *) E1AP_id) ;
+-	//ASN_SEQUENCE_ADD(&controlHeader_Fmt1->ueID.choice.gNB_UEID->gNB_CU_CP_UE_E1AP_ID_List->list,E1AP_ID_Item);
++	ue->m_eNB_UE_X2AP_ID = mEnbUeX2apId;
++	ue->globalENB_ID.eNB_ID.present = ENB_ID_PR_macro_eNB_ID;
++	BIT_STRING_t *macro = &ue->globalENB_ID.eNB_ID.choice.macro_eNB_ID;
++	macro->buf = (uint8_t *)calloc(1, 3);
++	if (OCTET_STRING_fromBuf(&ue->globalENB_ID.pLMNIdentity, (const char *)plmnId, (int)plmnIdSize) != 0 || !macro->buf) {
++		fprintf(stderr, "alloc globalENB_ID failed\n");
++		ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
++		return -1;
+ 	}
+-	
+-
+-        controlHeader_Fmt1->ric_Style_Type = ricControlStyleType;
+-        controlHeader_Fmt1->ric_ControlAction_ID = ricControlActionID;
+-
+-        controlHeaderIE->ric_controlHeader_formats.choice.controlHeader_Format1 = controlHeader_Fmt1;
+-
+-
+-        fprintf(stderr, "showing xer of asn_DEF_E2SM_RC_ControlHeader data\n");
+-        xer_fprint(stderr, &asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
+-        fprintf(stderr, "\n");
+-        fprintf(stderr, "After xer of asn_DEF_E2SM_RC_ControlHeader data\n");
+-   
+-        asn_enc_rval_t encode_result;
+-        encode_result = aper_encode_to_buffer(&asn_DEF_E2SM_RC_ControlHeader, NULL, controlHeaderIE, buffer, buf_size);
+-
+-
+-        ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
+-        if(encode_result.encoded == -1)
+-        {
+-                fprintf(stderr, "Cannot encode %s: %s\n", encode_result.failed_type->name, strerror(errno));
++	/* BIT STRING (SIZE(20)): the 20 bits left-aligned in 3 octets, 4 unused bits */
++	macro->size = 3;
++	macro->bits_unused = 4;
++	macro->buf[0] = (uint8_t)(macroEnbId >> 12);
++	macro->buf[1] = (uint8_t)(macroEnbId >> 4);
++	macro->buf[2] = (uint8_t)((macroEnbId & 0xF) << 4);
++
++	controlHeader_Fmt1->ric_Style_Type = ricControlStyleType;
++	controlHeader_Fmt1->ric_ControlAction_ID = ricControlActionID;
++
++	fprintf(stderr, "showing xer of asn_DEF_E2SM_RC_ControlHeader data\n");
++	xer_fprint(stderr, &asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
++	fprintf(stderr, "\n");
++
++	asn_enc_rval_t encode_result = aper_encode_to_buffer(&asn_DEF_E2SM_RC_ControlHeader, NULL, controlHeaderIE, buffer, buf_size);
++	ASN_STRUCT_FREE(asn_DEF_E2SM_RC_ControlHeader, controlHeaderIE);
++	if (encode_result.encoded == -1) {
++		fprintf(stderr, "Cannot encode %s: %s\n", encode_result.failed_type->name, strerror(errno));
+ 		return -1;
+-        }
+-        else
+-        {
+-               return encode_result.encoded;
+-        }
++	}
++	return encode_result.encoded;
+ }
+ 
+ ssize_t e2sm_encode_nrcgi(NR_CGI_t *nr_cgi, void* plmnIdValue, size_t  plmnId_size,ulong lNRCellId, uint8_t* buffer, size_t buf_size)
+diff --git a/e2sm/wrapper.h b/e2sm/wrapper.h
+index 64cf78d..9586a03 100755
+--- a/e2sm/wrapper.h
++++ b/e2sm/wrapper.h
+@@ -29,11 +29,9 @@
+ #include "RANParameter-ValueType-Choice-ElementFalse.h"
+ #include "RANParameter-ValueType-Choice-Structure.h"
+ #include "UEID.h"
+-#include "UEID-GNB.h"
+-#include "UEID-GNB-CU-F1AP-ID-List.h"
+-#include "UEID-GNB-CU-CP-E1AP-ID-List.h"
+-#include "UEID-GNB-CU-CP-F1AP-ID-Item.h"
+-#include "UEID-GNB-CU-CP-E1AP-ID-Item.h"
++#include "UEID-EN-GNB.h"
++#include "GlobalENB-ID.h"
++#include "ENB-ID.h"
+ #include "E2SM-RC-ControlMessage-Format1-Item.h"
+ #include "RANParameter-STRUCTURE-Item.h"
+ #include "E2SM-RC-ControlOutcome.h"
+@@ -42,23 +40,12 @@
+ #include "NR-CGI.h"
+ 
+ 
+-long    F1AP_id[1];
+-long    E1AP_id[1];
+-struct uEID {
+-    long    amf_UE_NGAP_Id;
+-    //size_t  amf_UE_NGAP_Id_size;
+-    const char* pLMNIdentity;
+-    size_t  pLMNIdentity_size;
+-    const char* aMFRegionID;
+-    size_t  aMFRegionID_size;
+-    const char* aMFSetID;
+-    size_t  aMFSetID_size;
+-    const char* aMFPointer;
+-    size_t  aMFPointer_size;
+-};
+-
+-
+-extern ssize_t e2sm_encode_ric_control_header(void *buffer, size_t buf_size,struct uEID *in,long f1AP[],size_t f1AP_len,long e1AP[],size_t e1Ap_len,long ricControlStyleType, long ricControlActionID, void *ranParameterValue, size_t ranParameterValue_size);
++/* RIC Control Header Format 1 (E2SM-RC 9.2.1.6.1): UE ID en-gNB-UEID {m-eNB-UE-X2AP-ID (0..4095), globalENB-ID
++ * {pLMN-Identity (3 octets), eNB-ID macro-eNB-ID (20 bits)}}, no optional member; ric-Style-Type and
++ * ric-ControlAction-ID. Returns the APER encoding length in bits, or -1. */
++extern ssize_t e2sm_encode_ric_control_header(void *buffer, size_t buf_size, long mEnbUeX2apId, const void *plmnId,
++				size_t plmnIdSize, unsigned long macroEnbId, long ricControlStyleType,
++				long ricControlActionID);
+ 
+ extern ssize_t e2sm_encode_ric_control_message(void *buffer, size_t buf_size, long targetPrimaryCell, long targetCell, long nrOrEUtraCell, long nrCGIOrECGI, void *ranParameterValue,  size_t  ranParameterValue_size);
+ 
+diff --git a/protocol/grpc/ricmsgcommrpc/proto/rc.proto b/protocol/grpc/ricmsgcommrpc/proto/rc.proto
+index 7ff8e8e..4ce36ad 100644
+--- a/protocol/grpc/ricmsgcommrpc/proto/rc.proto
++++ b/protocol/grpc/ricmsgcommrpc/proto/rc.proto
+@@ -29,6 +29,14 @@ message RICControlHeader {
+ 
+ message UeId {
+ 	gNBUEID         GnbUEID = 1;
++	enGNBUEID       EnGnbUEID = 2;  // exactly one of GnbUEID and EnGnbUEID is set (E2SM 6.2.2.6 CHOICE UE ID)
++}
++
++// en-gNB-UEID (E2SM 6.2.2.6): the UE ID at an en-gNB connected to EPC with EN-DC established.
++message enGNBUEID {
++	int64           mEnbUeX2apId = 1;      // MeNB UE X2AP ID, INTEGER (0..4095) (3GPP TS 36.423 9.2.24)
++	string          globalEnbPlmn = 2;     // Global eNB ID PLMN Identity, 3 octets as 6 hex digits
++	string          globalEnbMacroId = 3;  // Global eNB ID macro eNB ID, BIT STRING (SIZE(20)) as 5 hex digits
+ }
+ 
+ message gNBUEID {
+diff --git a/protocol/grpc/ricmsgcommrpc/rc/rc.pb.go b/protocol/grpc/ricmsgcommrpc/rc/rc.pb.go
+index 967ff88..f68cec1 100644
+--- a/protocol/grpc/ricmsgcommrpc/rc/rc.pb.go
++++ b/protocol/grpc/ricmsgcommrpc/rc/rc.pb.go
+@@ -12,6 +12,7 @@ It has these top-level messages:
+ 	RICE2APHeader
+ 	RICControlHeader
+ 	UeId
++	EnGNBUEID
+ 	GNBUEID
+ 	Guami
+ 	RICControlMessage
+@@ -148,7 +149,8 @@ func (m *RICControlHeader) GetUEID() *UeId {
+ }
+ 
+ type UeId struct {
+-	GnbUEID *GNBUEID `protobuf:"bytes,1,opt,name=GnbUEID" json:"GnbUEID,omitempty"`
++	GnbUEID   *GNBUEID   `protobuf:"bytes,1,opt,name=GnbUEID" json:"GnbUEID,omitempty"`
++	EnGnbUEID *EnGNBUEID `protobuf:"bytes,2,opt,name=EnGnbUEID" json:"EnGnbUEID,omitempty"`
+ }
+ 
+ func (m *UeId) Reset()                    { *m = UeId{} }
+@@ -163,6 +165,46 @@ func (m *UeId) GetGnbUEID() *GNBUEID {
+ 	return nil
+ }
+ 
++func (m *UeId) GetEnGnbUEID() *EnGNBUEID {
++	if m != nil {
++		return m.EnGnbUEID
++	}
++	return nil
++}
++
++// en-gNB-UEID (E2SM 6.2.2.6): the UE ID at an en-gNB connected to EPC with EN-DC established.
++type EnGNBUEID struct {
++	MEnbUeX2ApId     int64  `protobuf:"varint,1,opt,name=mEnbUeX2apId" json:"mEnbUeX2apId,omitempty"`
++	GlobalEnbPlmn    string `protobuf:"bytes,2,opt,name=globalEnbPlmn" json:"globalEnbPlmn,omitempty"`
++	GlobalEnbMacroId string `protobuf:"bytes,3,opt,name=globalEnbMacroId" json:"globalEnbMacroId,omitempty"`
++}
++
++func (m *EnGNBUEID) Reset()                    { *m = EnGNBUEID{} }
++func (m *EnGNBUEID) String() string            { return proto.CompactTextString(m) }
++func (*EnGNBUEID) ProtoMessage()               {}
++func (*EnGNBUEID) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{3} }
++
++func (m *EnGNBUEID) GetMEnbUeX2ApId() int64 {
++	if m != nil {
++		return m.MEnbUeX2ApId
++	}
++	return 0
++}
++
++func (m *EnGNBUEID) GetGlobalEnbPlmn() string {
++	if m != nil {
++		return m.GlobalEnbPlmn
++	}
++	return ""
++}
++
++func (m *EnGNBUEID) GetGlobalEnbMacroId() string {
++	if m != nil {
++		return m.GlobalEnbMacroId
++	}
++	return ""
++}
++
+ type GNBUEID struct {
+ 	AmfUENGAPID     int64   `protobuf:"varint,1,opt,name=amfUENGAPID" json:"amfUENGAPID,omitempty"`
+ 	Guami           *Guami  `protobuf:"bytes,2,opt,name=guami" json:"guami,omitempty"`
+@@ -173,7 +215,7 @@ type GNBUEID struct {
+ func (m *GNBUEID) Reset()                    { *m = GNBUEID{} }
+ func (m *GNBUEID) String() string            { return proto.CompactTextString(m) }
+ func (*GNBUEID) ProtoMessage()               {}
+-func (*GNBUEID) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{3} }
++func (*GNBUEID) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{4} }
+ 
+ func (m *GNBUEID) GetAmfUENGAPID() int64 {
+ 	if m != nil {
+@@ -213,7 +255,7 @@ type Guami struct {
+ func (m *Guami) Reset()                    { *m = Guami{} }
+ func (m *Guami) String() string            { return proto.CompactTextString(m) }
+ func (*Guami) ProtoMessage()               {}
+-func (*Guami) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{4} }
++func (*Guami) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{5} }
+ 
+ func (m *Guami) GetPLMNIdentity() string {
+ 	if m != nil {
+@@ -251,7 +293,7 @@ type RICControlMessage struct {
+ func (m *RICControlMessage) Reset()                    { *m = RICControlMessage{} }
+ func (m *RICControlMessage) String() string            { return proto.CompactTextString(m) }
+ func (*RICControlMessage) ProtoMessage()               {}
+-func (*RICControlMessage) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{5} }
++func (*RICControlMessage) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{6} }
+ 
+ func (m *RICControlMessage) GetRICControlCellTypeVal() RICControlCellTypeEnum {
+ 	if m != nil {
+@@ -281,7 +323,7 @@ type RicControlGrpcReq struct {
+ func (m *RicControlGrpcReq) Reset()                    { *m = RicControlGrpcReq{} }
+ func (m *RicControlGrpcReq) String() string            { return proto.CompactTextString(m) }
+ func (*RicControlGrpcReq) ProtoMessage()               {}
+-func (*RicControlGrpcReq) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{6} }
++func (*RicControlGrpcReq) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{7} }
+ 
+ func (m *RicControlGrpcReq) GetE2NodeID() string {
+ 	if m != nil {
+@@ -341,7 +383,7 @@ type RicControlGrpcRsp struct {
+ func (m *RicControlGrpcRsp) Reset()                    { *m = RicControlGrpcRsp{} }
+ func (m *RicControlGrpcRsp) String() string            { return proto.CompactTextString(m) }
+ func (*RicControlGrpcRsp) ProtoMessage()               {}
+-func (*RicControlGrpcRsp) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{7} }
++func (*RicControlGrpcRsp) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{8} }
+ 
+ func (m *RicControlGrpcRsp) GetRspCode() int32 {
+ 	if m != nil {
+@@ -361,6 +403,7 @@ func init() {
+ 	proto.RegisterType((*RICE2APHeader)(nil), "rc.RICE2APHeader")
+ 	proto.RegisterType((*RICControlHeader)(nil), "rc.RICControlHeader")
+ 	proto.RegisterType((*UeId)(nil), "rc.UeId")
++	proto.RegisterType((*EnGNBUEID)(nil), "rc.enGNBUEID")
+ 	proto.RegisterType((*GNBUEID)(nil), "rc.gNBUEID")
+ 	proto.RegisterType((*Guami)(nil), "rc.Guami")
+ 	proto.RegisterType((*RICControlMessage)(nil), "rc.RICControlMessage")
+@@ -447,49 +490,53 @@ var _MsgComm_serviceDesc = grpc.ServiceDesc{
+ func init() { proto.RegisterFile("rc.proto", fileDescriptor0) }
+ 
+ var fileDescriptor0 = []byte{
+-	// 692 bytes of a gzipped FileDescriptorProto
+-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x6c, 0x94, 0xcd, 0x6e, 0xda, 0x40,
+-	0x10, 0xc7, 0x6b, 0x0c, 0x21, 0x0c, 0x4d, 0x42, 0x36, 0x5f, 0x88, 0x46, 0x2d, 0xb2, 0xda, 0x0a,
+-	0x45, 0x6a, 0xa4, 0xd2, 0x07, 0xa8, 0x88, 0x63, 0x88, 0x15, 0x30, 0x68, 0xc0, 0xcd, 0x31, 0x72,
+-	0xec, 0x2d, 0x42, 0xc1, 0x1f, 0xac, 0x4d, 0xa5, 0x5c, 0x7a, 0xe8, 0xad, 0xef, 0xd0, 0x87, 0xad,
+-	0x76, 0x59, 0x30, 0x76, 0x38, 0xce, 0x6f, 0x3e, 0x76, 0xe6, 0x3f, 0xbb, 0x0b, 0xfb, 0xcc, 0xbd,
+-	0x8e, 0x58, 0x98, 0x84, 0xa4, 0xc0, 0x5c, 0xcd, 0x86, 0x03, 0x34, 0x75, 0xa3, 0xdd, 0x19, 0xdd,
+-	0x51, 0xc7, 0xa3, 0x8c, 0x5c, 0x42, 0x05, 0x9d, 0xa0, 0xbb, 0x0c, 0x5c, 0xd3, 0xab, 0x2b, 0x4d,
+-	0xa5, 0xa5, 0x62, 0x0a, 0xc8, 0x67, 0x38, 0x44, 0x53, 0x47, 0xba, 0x58, 0xd2, 0x38, 0x09, 0x99,
+-	0x79, 0x5b, 0x2f, 0x88, 0x90, 0x1c, 0xd5, 0x7e, 0x43, 0x0d, 0x4d, 0x5d, 0x0f, 0x83, 0x84, 0x85,
+-	0x73, 0x59, 0x59, 0x83, 0xb7, 0x12, 0x8c, 0x93, 0x97, 0x39, 0x95, 0xc5, 0x33, 0x8c, 0xb4, 0xe0,
+-	0x48, 0xda, 0x1d, 0x37, 0x99, 0x85, 0x81, 0xe9, 0xc9, 0x03, 0xf2, 0x98, 0x5c, 0x42, 0xd1, 0x36,
+-	0xcc, 0xdb, 0xba, 0xda, 0x54, 0x5a, 0xd5, 0xf6, 0xfe, 0x35, 0x73, 0xaf, 0x6d, 0x6a, 0x7a, 0x28,
+-	0xa8, 0xf6, 0x05, 0x8a, 0xdc, 0x22, 0x9f, 0xa0, 0xdc, 0x0b, 0x9e, 0x44, 0xa0, 0x22, 0x02, 0xab,
+-	0x3c, 0x70, 0x6a, 0xdd, 0x70, 0x84, 0x6b, 0x9f, 0xf6, 0x4f, 0x81, 0xb2, 0x84, 0xa4, 0x09, 0x55,
+-	0xc7, 0xff, 0x69, 0x1b, 0x56, 0xaf, 0x33, 0x92, 0x69, 0x2a, 0x6e, 0x23, 0xf2, 0x01, 0x4a, 0xd3,
+-	0xa5, 0xe3, 0xcf, 0x44, 0x6b, 0xd5, 0x76, 0x85, 0x97, 0xec, 0x71, 0x80, 0x2b, 0x4e, 0x3e, 0xc2,
+-	0xc1, 0xd4, 0xba, 0xd1, 0x6d, 0xdb, 0xe8, 0x7e, 0x15, 0x45, 0xd4, 0xa6, 0xda, 0x52, 0x31, 0x0b,
+-	0xf9, 0xac, 0x02, 0xe8, 0x23, 0xdb, 0x30, 0x56, 0x71, 0x45, 0x11, 0x97, 0xc7, 0xda, 0x5f, 0x05,
+-	0x4a, 0xe2, 0x00, 0xae, 0x61, 0xd4, 0x1f, 0x58, 0xa6, 0x47, 0x83, 0x64, 0x96, 0xbc, 0x88, 0xee,
+-	0x2a, 0x98, 0x61, 0x62, 0x80, 0x41, 0x17, 0xe9, 0x94, 0x0b, 0xb5, 0x5a, 0x50, 0x05, 0xb7, 0x11,
+-	0x69, 0xc0, 0xbe, 0x33, 0xe8, 0x8e, 0x69, 0x22, 0xf5, 0xab, 0xe0, 0xc6, 0x26, 0xef, 0x01, 0x9c,
+-	0x41, 0x77, 0x14, 0xce, 0x82, 0x84, 0xb2, 0x7a, 0x51, 0x78, 0xb7, 0x08, 0xef, 0xe5, 0x38, 0x5d,
+-	0xed, 0x80, 0xc6, 0xb1, 0x33, 0xa5, 0x64, 0x04, 0x67, 0x29, 0xd4, 0xe9, 0x7c, 0x3e, 0x79, 0x89,
+-	0xe8, 0x0f, 0x67, 0x2e, 0x1a, 0x3c, 0x6c, 0x37, 0xb8, 0x44, 0xaf, 0x03, 0x8c, 0x60, 0xe9, 0xe3,
+-	0xee, 0x44, 0x3e, 0xe9, 0xc4, 0x61, 0x53, 0x9a, 0x70, 0xb8, 0x19, 0x23, 0xc3, 0xb4, 0x3f, 0x2a,
+-	0x1c, 0xe3, 0xcc, 0x95, 0xd9, 0x3d, 0x16, 0xb9, 0x48, 0x17, 0x7c, 0x3a, 0xda, 0xb6, 0x42, 0x8f,
+-	0xca, 0xed, 0x55, 0x70, 0x63, 0x93, 0x73, 0xd8, 0x8b, 0xe6, 0x7e, 0x2a, 0x8b, 0xb4, 0x48, 0x1d,
+-	0xca, 0xcc, 0x09, 0x2c, 0xc7, 0xa7, 0x52, 0x90, 0xb5, 0x49, 0xbe, 0x8b, 0x71, 0xd3, 0x07, 0x72,
+-	0xeb, 0x24, 0x8e, 0x90, 0xa5, 0xda, 0x3e, 0x96, 0x53, 0xa5, 0x4e, 0x7c, 0x1d, 0x4b, 0xee, 0xe0,
+-	0x34, 0xff, 0x14, 0x44, 0x8d, 0x92, 0xa8, 0x71, 0x9a, 0x55, 0x46, 0x96, 0xd9, 0x99, 0x41, 0xee,
+-	0xb7, 0x45, 0x96, 0xca, 0x8b, 0x52, 0x7b, 0xa2, 0xd4, 0x59, 0xb6, 0x94, 0x0c, 0xc0, 0xdd, 0x39,
+-	0xa4, 0x07, 0x27, 0xa9, 0xa3, 0xe3, 0x3e, 0x23, 0x5d, 0xf0, 0x7d, 0x95, 0xc5, 0xbe, 0x72, 0xa5,
+-	0x3a, 0xee, 0xb3, 0x58, 0xd5, 0xae, 0x0c, 0x6d, 0xf8, 0x6a, 0x07, 0x71, 0x24, 0xf4, 0x8c, 0x23,
+-	0x3d, 0xf4, 0x56, 0xcf, 0xbc, 0x84, 0x6b, 0x93, 0xdf, 0x4e, 0x8f, 0xc6, 0x2e, 0x9b, 0x45, 0xfc,
+-	0x21, 0xaf, 0x6f, 0xe7, 0x16, 0xba, 0x7a, 0x86, 0xf3, 0xdd, 0x57, 0x85, 0xbc, 0x83, 0x0b, 0x34,
+-	0xf5, 0x47, 0x7d, 0x68, 0x4d, 0x70, 0xd8, 0x7f, 0xd4, 0x8d, 0x7e, 0xff, 0xd1, 0xb6, 0xee, 0x1f,
+-	0x86, 0x56, 0xed, 0x0d, 0xb9, 0x10, 0x03, 0x6d, 0x9c, 0x16, 0x0a, 0x7f, 0x4d, 0xc9, 0x67, 0x19,
+-	0xf6, 0x04, 0x3b, 0xd6, 0xca, 0x59, 0xb8, 0x62, 0xdb, 0xb7, 0x59, 0xce, 0x49, 0x1a, 0xa2, 0x83,
+-	0x4d, 0x46, 0x47, 0xbf, 0x4f, 0x8f, 0x39, 0x07, 0x92, 0x39, 0x66, 0xc8, 0xdd, 0x35, 0x85, 0x9c,
+-	0xc0, 0x51, 0x2e, 0xa7, 0x56, 0x20, 0xa7, 0xe2, 0x1b, 0x4c, 0x83, 0x39, 0x55, 0xdb, 0x0f, 0x50,
+-	0x1e, 0xc4, 0x53, 0x3d, 0xf4, 0x7d, 0xd2, 0x87, 0xcb, 0x31, 0x0d, 0xbc, 0xb4, 0x05, 0xa4, 0x8b,
+-	0x31, 0x65, 0xbf, 0x66, 0x2e, 0xe5, 0x52, 0x92, 0xd5, 0x22, 0xf2, 0x57, 0xbc, 0xb1, 0x0b, 0xc7,
+-	0xd1, 0xd3, 0x9e, 0xf8, 0xd7, 0xbf, 0xfd, 0x0f, 0x00, 0x00, 0xff, 0xff, 0xfb, 0x53, 0x8b, 0xc3,
+-	0xe3, 0x05, 0x00, 0x00,
++	// 764 bytes of a gzipped FileDescriptorProto
++	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x6c, 0x95, 0x6d, 0x6f, 0xda, 0x48,
++	0x10, 0xc7, 0xcf, 0x18, 0x42, 0x3c, 0x5c, 0x12, 0xb2, 0x79, 0x42, 0x5c, 0x74, 0x87, 0xac, 0xbb,
++	0x13, 0xca, 0x49, 0x91, 0x8e, 0x7e, 0x80, 0x8a, 0x18, 0x43, 0xac, 0x80, 0x41, 0x0b, 0x6e, 0xaa,
++	0xbe, 0x89, 0x16, 0x7b, 0x8b, 0x50, 0xfc, 0x84, 0x6d, 0x2a, 0xe5, 0x4d, 0xa5, 0xf6, 0x5d, 0xbf,
++	0x43, 0x3f, 0x6c, 0xb5, 0xcb, 0x62, 0x63, 0xc3, 0xcb, 0xf9, 0xcd, 0x7f, 0x66, 0xf7, 0x3f, 0xb3,
++	0x18, 0x38, 0x8e, 0xec, 0xfb, 0x30, 0x0a, 0x92, 0x00, 0x95, 0x22, 0x5b, 0xb5, 0xe0, 0x04, 0x1b,
++	0x9a, 0xde, 0xe9, 0x4e, 0x1e, 0x29, 0x71, 0x68, 0x84, 0x6e, 0x41, 0xc1, 0xc4, 0xef, 0xaf, 0x7d,
++	0xdb, 0x70, 0x1a, 0x52, 0x4b, 0x6a, 0xcb, 0x38, 0x03, 0xe8, 0x5f, 0x38, 0xc5, 0x86, 0x86, 0xe9,
++	0x6a, 0x4d, 0xe3, 0x24, 0x88, 0x8c, 0x5e, 0xa3, 0xc4, 0x25, 0x05, 0xaa, 0x7e, 0x85, 0x3a, 0x36,
++	0x34, 0x2d, 0xf0, 0x93, 0x28, 0x70, 0x45, 0x67, 0x15, 0x7e, 0x17, 0x60, 0x9a, 0xbc, 0xb9, 0x54,
++	0x34, 0xcf, 0x31, 0xd4, 0x86, 0x33, 0x11, 0x77, 0xed, 0x64, 0x19, 0xf8, 0x86, 0x23, 0x0e, 0x28,
++	0x62, 0x74, 0x0b, 0x65, 0x4b, 0x37, 0x7a, 0x0d, 0xb9, 0x25, 0xb5, 0x6b, 0x9d, 0xe3, 0xfb, 0xc8,
++	0xbe, 0xb7, 0xa8, 0xe1, 0x60, 0x4e, 0xd5, 0x4f, 0x50, 0x66, 0x11, 0xfa, 0x07, 0xaa, 0x03, 0x7f,
++	0xce, 0x85, 0x12, 0x17, 0xd6, 0x98, 0x70, 0x61, 0x3e, 0x30, 0x84, 0xb7, 0x39, 0xf4, 0x1f, 0x28,
++	0xba, 0xbf, 0x15, 0x96, 0xb8, 0xf0, 0x84, 0x09, 0xa9, 0x3f, 0x10, 0xd2, 0x2c, 0xaf, 0x7e, 0x93,
++	0x40, 0x49, 0x13, 0xcc, 0x95, 0xa7, 0xfb, 0x73, 0x8b, 0x7e, 0xec, 0x90, 0x30, 0x1d, 0x59, 0x8e,
++	0xa1, 0xbf, 0xe1, 0x64, 0xe1, 0x06, 0x73, 0xe2, 0xea, 0xfe, 0x7c, 0xe2, 0x7a, 0x3e, 0x3f, 0x42,
++	0xc1, 0x79, 0x88, 0xee, 0xa0, 0x9e, 0x82, 0x11, 0xb1, 0xa3, 0xc0, 0x70, 0xb8, 0x3b, 0x05, 0xef,
++	0x71, 0xf5, 0xa7, 0x04, 0x55, 0xe1, 0x02, 0xb5, 0xa0, 0x46, 0xbc, 0xcf, 0x96, 0x6e, 0x0e, 0xba,
++	0x13, 0xe1, 0x53, 0xc6, 0xbb, 0x08, 0xfd, 0x05, 0x95, 0xc5, 0x9a, 0x78, 0x4b, 0x61, 0x4d, 0x61,
++	0xd6, 0x06, 0x0c, 0xe0, 0x0d, 0xe7, 0x17, 0x34, 0x1f, 0x34, 0xcb, 0xd2, 0xfb, 0xff, 0xf3, 0x26,
++	0x72, 0x4b, 0x6e, 0xcb, 0x38, 0x0f, 0xd9, 0x72, 0x38, 0xd0, 0x26, 0x96, 0xae, 0x6f, 0x74, 0x65,
++	0xae, 0x2b, 0x62, 0xf5, 0x87, 0x04, 0x15, 0x7e, 0x00, 0x1b, 0x4f, 0x38, 0x1c, 0x99, 0x86, 0x43,
++	0xfd, 0x64, 0x99, 0xbc, 0xf1, 0xdb, 0x29, 0x38, 0xc7, 0xb8, 0x81, 0x51, 0x1f, 0xd3, 0x05, 0xdb,
++	0x6c, 0x4f, 0x0c, 0x67, 0x17, 0xa1, 0x26, 0x1c, 0x93, 0x51, 0x7f, 0x4a, 0x13, 0xb1, 0x70, 0x05,
++	0xa7, 0x31, 0xfa, 0x13, 0x80, 0x8c, 0xfa, 0x93, 0x60, 0xe9, 0x27, 0x34, 0x6a, 0x94, 0x79, 0x76,
++	0x87, 0xb0, 0xbb, 0x9c, 0x67, 0x6f, 0x71, 0x44, 0xe3, 0x98, 0x2c, 0x28, 0x9a, 0xc0, 0x55, 0x06,
++	0x35, 0xea, 0xba, 0xb3, 0xb7, 0x90, 0x7e, 0x20, 0x2e, 0xbf, 0xe0, 0x69, 0xa7, 0xc9, 0x46, 0xb4,
++	0x2f, 0xd0, 0xfd, 0xb5, 0x87, 0x0f, 0x17, 0x32, 0xa7, 0x33, 0x12, 0x2d, 0x68, 0xc2, 0x60, 0x6a,
++	0x23, 0xc7, 0xd4, 0xef, 0x32, 0x9c, 0xe3, 0xa5, 0x2d, 0xaa, 0x07, 0x51, 0x68, 0x63, 0xba, 0x62,
++	0xee, 0x68, 0xc7, 0x0c, 0x1c, 0x2a, 0xb6, 0xa7, 0xe0, 0x34, 0x46, 0xd7, 0x70, 0x14, 0xba, 0x5e,
++	0x36, 0x16, 0x11, 0xa1, 0x06, 0x54, 0x23, 0xe2, 0x9b, 0xc4, 0xa3, 0x62, 0x20, 0xdb, 0x10, 0xbd,
++	0xe7, 0x76, 0xb3, 0x5f, 0x74, 0x8f, 0x24, 0x84, 0x8f, 0xa5, 0xd6, 0x39, 0x17, 0xae, 0xb2, 0x24,
++	0xde, 0xd7, 0xa2, 0x47, 0xb8, 0x2c, 0xfe, 0x76, 0x79, 0x8f, 0x0a, 0xef, 0x71, 0x99, 0x9f, 0x8c,
++	0x68, 0x73, 0xb0, 0x02, 0x3d, 0xed, 0x0e, 0x59, 0x4c, 0x9e, 0xb7, 0x3a, 0xe2, 0xad, 0xae, 0xf2,
++	0xad, 0x84, 0x00, 0x1f, 0xae, 0x41, 0x03, 0xb8, 0xc8, 0x12, 0x5d, 0xfb, 0x15, 0xd3, 0x15, 0xdb,
++	0x57, 0x95, 0xef, 0xab, 0xd0, 0xaa, 0x6b, 0xbf, 0xf2, 0x55, 0x1d, 0xaa, 0x50, 0xc7, 0x7b, 0x3b,
++	0x88, 0x43, 0x3e, 0xcf, 0x38, 0xd4, 0x02, 0x67, 0xf3, 0x5d, 0xaa, 0xe0, 0x6d, 0xc8, 0x5e, 0xa7,
++	0x43, 0x63, 0x3b, 0x5a, 0x86, 0xec, 0xcb, 0xb3, 0x7d, 0x9d, 0x3b, 0xe8, 0xee, 0x15, 0xae, 0x0f,
++	0x3f, 0x15, 0xf4, 0x07, 0xdc, 0x60, 0x43, 0x7b, 0xd1, 0xc6, 0xe6, 0x0c, 0x8f, 0x87, 0x2f, 0x9a,
++	0x3e, 0x1c, 0xbe, 0x58, 0xe6, 0xd3, 0xf3, 0xd8, 0xac, 0xff, 0x86, 0x6e, 0xb8, 0xa1, 0x34, 0x69,
++	0x62, 0x9e, 0xaf, 0x4b, 0xc5, 0x2a, 0xdd, 0x9a, 0xe1, 0xae, 0xb9, 0x49, 0x96, 0xee, 0xa2, 0xdd,
++	0xd7, 0x2c, 0x7c, 0xa2, 0x26, 0xbf, 0x41, 0x5a, 0xd1, 0xd5, 0x9e, 0xb2, 0x63, 0xae, 0x01, 0xe5,
++	0x8e, 0x19, 0xb3, 0x74, 0x5d, 0x42, 0x17, 0x70, 0x56, 0xa8, 0xa9, 0x97, 0xd0, 0x25, 0xff, 0x6e,
++	0x67, 0x62, 0x46, 0xe5, 0xce, 0x33, 0x54, 0x47, 0xf1, 0x42, 0x0b, 0x3c, 0x0f, 0x0d, 0xe1, 0x76,
++	0x4a, 0x7d, 0x27, 0xbb, 0x02, 0xa6, 0xab, 0x29, 0x8d, 0xbe, 0x2c, 0x6d, 0xca, 0x46, 0x89, 0x36,
++	0x8b, 0x28, 0x3e, 0xf1, 0xe6, 0x21, 0x1c, 0x87, 0xf3, 0x23, 0xfe, 0x47, 0xf4, 0xee, 0x57, 0x00,
++	0x00, 0x00, 0xff, 0xff, 0x78, 0xdb, 0xac, 0x43, 0x94, 0x06, 0x00, 0x00,
+ }

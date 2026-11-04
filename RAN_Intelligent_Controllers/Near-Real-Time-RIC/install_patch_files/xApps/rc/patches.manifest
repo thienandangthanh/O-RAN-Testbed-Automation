@@ -3,3 +3,4 @@
 # it builds librc_codec from. The rc image's patchset.sha256 label derives from this file and the files it lists.
 0001-bound-ran-parameter-id.patch
 0002-send-the-target-cell-as-an-aper-nr-cgi.patch
+0003-send-dc-pscell-change-control-with-an-en-gnb-ueid.patch
