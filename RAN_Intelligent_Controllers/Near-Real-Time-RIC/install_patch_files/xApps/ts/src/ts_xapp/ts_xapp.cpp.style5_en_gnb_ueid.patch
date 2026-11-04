@@ -32,7 +32,7 @@ index 3b324f8..8bed462 100644
  typedef struct nodeb {
    string ran_name;
    struct {
-@@ -614,56 +630,124 @@ void send_rest_control_request( string ue_id, string serving_cell_id, string tar
+@@ -614,56 +630,126 @@ void send_rest_control_request( string ue_id, string serving_cell_id, string tar
  
  }
  
@@ -47,7 +47,9 @@ index 3b324f8..8bed462 100644
  
 +/*
 +  True if at least one UeMetrics point in the bucket carries exactly the ueId tag `tag` within kUeMetricsWindow.
-+  The Flux query names only the measurement, the ueId tag and the time. `tag` must already be a parsed
++  The Flux query names only the measurement, the ueId tag and the time. It keeps only _time before group():
++  kpimon writes integer and float fields, and grouping their _value columns into one table is a schema
++  collision that InfluxDB answers with HTTP 400. `tag` must already be a parsed
 +  en-gNB-UEID tag (digits, uppercase hex, ':', '@', '-'), so it needs no escaping inside the Flux string.
 +  On any error returns false and writes the reason to why; the token is never logged.
 +*/
@@ -67,7 +69,7 @@ index 3b324f8..8bed462 100644
 +  const string flux = "from(bucket: \"" + influx.bucket + "\")"
 +                      " |> range(start: " + kUeMetricsWindow + ")"
 +                      " |> filter(fn: (r) => r._measurement == \"UeMetrics\" and r.ueId == \"" + tag + "\")"
-+                      " |> group() |> limit(n: 1) |> keep(columns: [\"_time\"])";
++                      " |> keep(columns: [\"_time\"]) |> group() |> limit(n: 1)";
 +  const string auth = "Authorization: Token " + influx.token;
 +  struct curl_slist *headers = NULL;
 +  headers = curl_slist_append( headers, auth.c_str() );
@@ -195,7 +197,7 @@ index 3b324f8..8bed462 100644
    grpc::Status status = rc_stub->SendRICControlReqServiceGrpc( &context, *request, &response );
  
    if( status.ok() ) {
-@@ -711,6 +795,10 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
+@@ -711,6 +797,10 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
  
    // Getting the current serving cell throughput prediction
    auto cell = throughput_map.find( handler.serving_cell_id );
@@ -206,7 +208,7 @@ index 3b324f8..8bed462 100644
    serving_cell_throughput = cell->second;
  
     // Iterating to identify the highest throughput prediction
-@@ -737,7 +825,7 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
+@@ -737,7 +827,7 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
      if ( ts_control_api == TsControlApi::REST ) {
        send_rest_control_request( handler.ue_id, handler.serving_cell_id, highest_throughput_cell_id );
      } else {
@@ -215,7 +217,7 @@ index 3b324f8..8bed462 100644
      }
  
    } else {
-@@ -902,6 +990,21 @@ extern int main( int argc, char** argv ) {
+@@ -902,6 +992,21 @@ extern int main( int argc, char** argv ) {
        cout << "[ERROR] unable to map cells to nodeb\n";
      }
  
