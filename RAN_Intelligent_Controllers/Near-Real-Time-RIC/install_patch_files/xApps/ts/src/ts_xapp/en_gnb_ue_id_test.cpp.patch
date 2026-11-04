@@ -1,16 +1,16 @@
 diff --git a/src/ts_xapp/en_gnb_ue_id_test.cpp b/src/ts_xapp/en_gnb_ue_id_test.cpp
 new file mode 100644
-index 0000000..f7d4dac
+index 0000000..0f93e20
 --- /dev/null
 +++ b/src/ts_xapp/en_gnb_ue_id_test.cpp
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,96 @@
 +/*
 +    Mnemonic:	en_gnb_ue_id_test.cpp
 +    Abstract:	Unit test of the header-only helpers of the TS xApp's control path: parse_en_gnb_ue_id
 +                (en_gnb_ue_id.hpp) with valid tags, values out of range and tags of another form, and
-+                influx_csv_has_time_record (influx_csv.hpp) with a result, empty answers and InfluxDB's streamed
-+                error table. Built and run by `make` (src/ts_xapp/CMakeLists.txt), so the image build fails when
-+                it fails. Prints PASS/FAIL <case>; exit 0 only if every case passes.
++                influx_csv_has_time_record (influx_csv.hpp) with a result, empty answers, InfluxDB's streamed
++                error table and an HTTP 400 body. Built and run by `make` (src/ts_xapp/CMakeLists.txt), so the
++                image build fails when it fails. Prints PASS/FAIL <case>; exit 0 only if every case passes.
 +*/
 +
 +#include <cstdio>
@@ -92,6 +92,10 @@ index 0000000..f7d4dac
 +       ",query failed,\n", false );
 +  csv( "empty-time-cell", ",result,table,_time\n,_result,0,\n", false );
 +  csv( "no-time-column", ",result,table,_value\n,_result,0,1\n", false );
++  // InfluxDB 2.7's HTTP 400 body for a query that groups integer and float values together; the TS xApp refuses
++  // any status but 200 before it reads the body, and the reader refuses this body as well
++  csv( "http-400-schema-collision", "{\"code\":\"invalid\",\"message\":\"runtime error @1:153-1:164: limit: "
++       "schema collision: cannot group integer and float types together\"}", false );
 +
 +  printf( "en_gnb_ue_id_test: %s\n", failures ? "FAIL" : "ok" );
 +  return failures ? 1 : 0;
