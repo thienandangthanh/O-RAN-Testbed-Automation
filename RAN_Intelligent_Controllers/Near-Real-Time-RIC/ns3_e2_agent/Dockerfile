@@ -64,10 +64,17 @@ RUN git clone -q https://github.com/o-ran-sc/ric-app-rc.git /playpen/rc && git -
 
 # asn1c for the X2AP codec: the commit whose skeleton runtime equals NIST's
 # e2sim/asn1c tree (x2ap_codec/SOURCES.txt); the generated C goes to /playpen/x2ap-gen.
+# --disable-test-asan: by default configure runs a program built with -fsanitize=address
+# (configure.ac AC_RUN_IFELSE). With the base image's gcc 11 runtime, on a kernel with
+# vm.mmap_rnd_bits=32 (Ubuntu 24.04), that program can loop forever printing
+# "AddressSanitizer:DEADLYSIGNAL" into config.log, so the build hangs and fills the disk.
+# The sanitizer flags reach only asn1c's own test suite, which is not built here, so the
+# asn1c binary and the C it generates are the same either way.
 ARG ASN1C_SHA=30d7a84e44bb478e360a31202b06045f446e11be
 RUN git clone -q https://github.com/mouse07410/asn1c.git /playpen/asn1c-src && git -C /playpen/asn1c-src checkout -q $ASN1C_SHA \
 	&& test "$(git -C /playpen/asn1c-src rev-parse HEAD)" = "$ASN1C_SHA" \
-	&& cd /playpen/asn1c-src && autoreconf -i && ./configure --prefix=/playpen/asn1c && make -j"$(nproc)" && make install \
+	&& cd /playpen/asn1c-src && autoreconf -i && ./configure --prefix=/playpen/asn1c --disable-test-asan \
+	&& make -j"$(nproc)" && make install \
 	&& rm -rf /playpen/asn1c-src
 COPY e2sm_examples/ns3_e2_agent/x2ap_codec/asn/ /playpen/x2ap-asn/
 RUN mkdir /playpen/x2ap-gen && cd /playpen/x2ap-gen \
