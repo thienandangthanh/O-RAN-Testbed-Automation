@@ -1,0 +1,16 @@
+diff --git a/src/ts_xapp/CMakeLists.txt b/src/ts_xapp/CMakeLists.txt
+index 47fd406..a6965ec 100644
+--- a/src/ts_xapp/CMakeLists.txt
++++ b/src/ts_xapp/CMakeLists.txt
+@@ -30,6 +30,11 @@ target_link_libraries( ts_xapp
+                         curl
+ )
+ 
++# The ueId tag parser's unit test runs after every build of it: a failure fails the build (and the image).
++add_executable( en_gnb_ue_id_test en_gnb_ue_id_test.cpp )
++add_custom_command( TARGET en_gnb_ue_id_test POST_BUILD COMMAND en_gnb_ue_id_test )
++add_dependencies( ts_xapp en_gnb_ue_id_test )
++
+ install(
+     TARGETS ts_xapp
+     DESTINATION ${install_bin}

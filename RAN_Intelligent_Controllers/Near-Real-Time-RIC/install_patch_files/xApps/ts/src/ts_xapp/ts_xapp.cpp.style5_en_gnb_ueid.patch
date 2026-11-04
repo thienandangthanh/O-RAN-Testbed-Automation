@@ -1,0 +1,242 @@
+diff --git a/src/ts_xapp/ts_xapp.cpp b/src/ts_xapp/ts_xapp.cpp
+index 3b324f8..5cf1d5f 100644
+--- a/src/ts_xapp/ts_xapp.cpp
++++ b/src/ts_xapp/ts_xapp.cpp
+@@ -77,6 +77,7 @@
+ #include "protobuf/rc.grpc.pb.h"
+ 
+ #include "utils/restclient.hpp"
++#include "en_gnb_ue_id.hpp"
+ 
+ 
+ using namespace rapidjson;
+@@ -101,6 +102,20 @@ enum class TsControlApi { REST, gRPC };
+ TsControlApi ts_control_api;  // api to send control messages
+ string ts_control_ep;         // api target endpoint
+ 
++// The Influx v2 API that kpimon writes its UeMetrics points to (descriptor controls influx_url, influx_org,
++// influx_bucket, influx_token; the installer sets them, the token from the cluster's InfluxDB at install time).
++// Before a gRPC control the TS xApp confirms that a UeMetrics point carries exactly the UE's ueId tag; without the
++// four settings it sends no control.
++struct InfluxConfig {
++  string url;     // scheme://host:port
++  string org;
++  string bucket;
++  string token;
++  bool ok() const { return !url.empty() && !org.empty() && !bucket.empty() && !token.empty(); }
++} influx;
++// How far back a UeMetrics point counts as the UE being reported now.
++const char *kUeMetricsWindow = "-60s";
++
+ typedef struct nodeb {
+   string ran_name;
+   struct {
+@@ -614,56 +629,128 @@ void send_rest_control_request( string ue_id, string serving_cell_id, string tar
+ 
+ }
+ 
+-// sends a handover message to RC xApp through gRPC
+-void send_grpc_control_request( string ue_id, string target_cell_id ) {
+-  grpc::ClientContext context;
++// Influx v2 response body sink (libcurl write callback).
++static size_t influx_body_cb( char *in, size_t size, size_t num, string *out ) {
++  out->append( in, size * num );
++  return size * num;
++}
++
++/*
++  True if at least one UeMetrics point in the bucket carries exactly the ueId tag `tag` within kUeMetricsWindow.
++  The Flux query names only the measurement, the ueId tag and the time. `tag` must already be a parsed
++  en-gNB-UEID tag (digits, uppercase hex, ':', '@', '-'), so it needs no escaping inside the Flux string.
++  On any error returns false and writes the reason to why; the token is never logged.
++*/
++bool ue_has_metrics_row( const string &tag, string &why ) {
++  if( !influx.ok() ) {
++    why = "Influx is not configured (descriptor controls influx_url, influx_org, influx_bucket, influx_token)";
++    return false;
++  }
++  CURL *curl = curl_easy_init();
++  if( curl == NULL ) {
++    why = "curl_easy_init failed";
++    return false;
++  }
++  char *org = curl_easy_escape( curl, influx.org.c_str(), 0 );
++  const string url = influx.url + "/api/v2/query?org=" + ( org ? org : "" );
++  curl_free( org );
++  const string flux = "from(bucket: \"" + influx.bucket + "\")"
++                      " |> range(start: " + kUeMetricsWindow + ")"
++                      " |> filter(fn: (r) => r._measurement == \"UeMetrics\" and r.ueId == \"" + tag + "\")"
++                      " |> group() |> limit(n: 1) |> keep(columns: [\"_time\"])";
++  const string auth = "Authorization: Token " + influx.token;
++  struct curl_slist *headers = NULL;
++  headers = curl_slist_append( headers, auth.c_str() );
++  headers = curl_slist_append( headers, "Content-Type: application/vnd.flux" );
++  headers = curl_slist_append( headers, "Accept: application/csv" );
++  string body;
++  char errbuf[CURL_ERROR_SIZE] = { 0 };
++  long status = 0;
++  CURLcode res = CURLE_OK;
++  if( headers == NULL ||
++      ( res = curl_easy_setopt( curl, CURLOPT_URL, url.c_str() ) ) != CURLE_OK ||
++      ( res = curl_easy_setopt( curl, CURLOPT_HTTPHEADER, headers ) ) != CURLE_OK ||
++      ( res = curl_easy_setopt( curl, CURLOPT_POSTFIELDS, flux.c_str() ) ) != CURLE_OK ||
++      ( res = curl_easy_setopt( curl, CURLOPT_TIMEOUT, 5L ) ) != CURLE_OK ||
++      ( res = curl_easy_setopt( curl, CURLOPT_ERRORBUFFER, errbuf ) ) != CURLE_OK ||
++      ( res = curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, influx_body_cb ) ) != CURLE_OK ||
++      ( res = curl_easy_setopt( curl, CURLOPT_WRITEDATA, &body ) ) != CURLE_OK ||
++      ( res = curl_easy_perform( curl ) ) != CURLE_OK ||
++      ( res = curl_easy_getinfo( curl, CURLINFO_RESPONSE_CODE, &status ) ) != CURLE_OK ) {
++    why = string( "Influx query failed: " ) + ( errbuf[0] ? errbuf : curl_easy_strerror( res ) );
++  }
++  curl_slist_free_all( headers );
++  curl_easy_cleanup( curl );
++  if( !why.empty() ) return false;
++  if( status != 200 ) {
++    why = "Influx query answered HTTP " + to_string( status ) + ": " + body.substr( 0, 200 );
++    return false;
++  }
++  // annotated CSV without annotations: a header line, then one line per point; empty lines separate tables
++  int lines = 0;
++  stringstream ss( body );
++  for( string line; getline( ss, line ); ) {
++    if( !line.empty() && line.back() == '\r' ) line.pop_back();
++    if( !line.empty() && line[0] != '#' ) lines++;
++  }
++  if( lines < 2 ) {
++    why = string( "no UeMetrics point with this ueId tag in the last " ) + ( kUeMetricsWindow + 1 );
++    return false;
++  }
++  return true;
++}
+ 
++/*
++  Sends a DC PSCell Change control (E2SM-RC CONTROL Style 5 "Dual Connectivity control", action 3, v03.00
++  7.6.6.1) to RC xApp through gRPC: the UE `ue_id` (the ueId tag kpimon writes, en-gNB-UEID) is moved from its
++  serving PSCell to `target_cell_id`. The control goes to the source en-gNB, the node of the serving cell, which
++  takes the SN-initiated SN change (3GPP TS 37.340 10.5.1). No control is sent when the tag is not an
++  en-gNB-UEID, when no UeMetrics point carries it, or when the serving cell has no node.
++*/
++void send_grpc_control_request( string ue_id, string serving_cell_id, string target_cell_id ) {
++  ts::EnGnbUeId ue;
++  string why;
++  if( !ts::parse_en_gnb_ue_id( ue_id, ue, why ) ) {
++    cout << "[INFO] No RIC CONTROL for UE \"" << ue_id << "\": " << why << endl;
++    return;
++  }
++  if( !ue_has_metrics_row( ue_id, why ) ) {
++    cout << "[INFO] No RIC CONTROL for UE \"" << ue_id << "\": " << why << endl;
++    return;
++  }
++  auto source = cell_map.find( serving_cell_id );
++  if( source == cell_map.end() ) {
++    cout << "[INFO] No RIC CONTROL for UE \"" << ue_id << "\": no node for its serving cell \""
++         << serving_cell_id << "\"" << endl;
++    return;
++  }
++
++  grpc::ClientContext context;
+   rc::RicControlGrpcRsp response;
+   shared_ptr<rc::RicControlGrpcReq> request = make_shared<rc::RicControlGrpcReq>();
+ 
++  request->set_e2nodeid( source->second->ran_name );
++  request->set_ranname( source->second->ran_name );
++  request->set_plmnid( source->second->global_nb_id.plmn_id );
++
+   rc::RICE2APHeader *apHeader = request->mutable_rice2apheaderdata();
+   apHeader->set_ranfuncid(3);
+   apHeader->set_ricrequestorid( 1 );
+ 
+   rc::RICControlHeader *ctrlHeader = request->mutable_riccontrolheaderdata();
+-  ctrlHeader->set_controlstyle( 3 );
+-  ctrlHeader->set_controlactionid( 1 );
+-  rc::UeId *ueid =  ctrlHeader->mutable_ueid();
+-  rc::gNBUEID* gnbue= ueid->mutable_gnbueid();
+-  gnbue->set_amfuengapid(stoi(ue_id));
+-  gnbue->add_gnbcuuef1apid(stoi(ue_id));
+-  gnbue->add_gnbcucpuee1apid(stoi(ue_id));
+-  rc::Guami* gumi=gnbue->mutable_guami();
+-  //As of now hardcoded according to the value setted in VIAVI RSG TOOL
+-  gumi->set_amfregionid("10100000");
+-  gumi->set_amfsetid("0000000000");
+-  gumi->set_amfpointer("000001");
+-  
+-  //ctrlHeader->set_ueid( ue_id );
++  ctrlHeader->set_controlstyle( 5 );
++  ctrlHeader->set_controlactionid( 3 );
++  rc::enGNBUEID *engnbue = ctrlHeader->mutable_ueid()->mutable_engnbueid();
++  engnbue->set_menbuex2apid( ue.m_enb_ue_x2ap_id );
++  engnbue->set_globalenbplmn( ue.global_enb_plmn );
++  engnbue->set_globalenbmacroid( ue.global_enb_macro_id );
+ 
+   rc::RICControlMessage *ctrlMsg = request->mutable_riccontrolmessagedata();
+-  ctrlMsg->set_riccontrolcelltypeval( rc::RICControlCellTypeEnum::RIC_CONTROL_CELL_UNKWON );
+-  //ctrlMsg->set_riccontrolcelltypeval( api::RIC_CONTROL_CELL_UNKWON);
+-    
+-    ctrlMsg->set_targetcellid( target_cell_id);
+-
+-  auto data = cell_map.find(target_cell_id);
+-  if( data != cell_map.end() ) {
+-    request->set_e2nodeid( data->second->global_nb_id.nb_id );
+-    request->set_plmnid( data->second->global_nb_id.plmn_id );
+-    request->set_ranname( data->second->ran_name );
+-    gumi->set_plmnidentity(data->second->global_nb_id.plmn_id);
+-  } else {
+-    cout << "[INFO] Cannot find RAN name corresponding to cell id = "<<target_cell_id<<endl;
+-    return;
+-    request->set_e2nodeid( "unknown_e2nodeid" );
+-    request->set_plmnid( "unknown_plmnid" );
+-    request->set_ranname( "unknown_ranname" );
+-    gumi->set_plmnidentity("unknown_plmnid");
+-  }
++  ctrlMsg->set_riccontrolcelltypeval( rc::RICControlCellTypeEnum::RIC_CONTROL_NR_CELL );
++  ctrlMsg->set_targetcellid( target_cell_id );
++
+   request->set_riccontrolackreqval( rc::RICControlAckEnum::RIC_CONTROL_ACK_UNKWON );
+-  //request->set_riccontrolackreqval( api::RIC_CONTROL_ACK_UNKWON);  // not yet used in api.proto
+- cout<<"\nin ts xapp grpc message content \n"<< request->DebugString()<<"\n"; 
++  cout << "\nin ts xapp grpc message content \n" << request->DebugString() << "\n";
+   grpc::Status status = rc_stub->SendRICControlReqServiceGrpc( &context, *request, &response );
+ 
+   if( status.ok() ) {
+@@ -711,6 +798,10 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
+ 
+   // Getting the current serving cell throughput prediction
+   auto cell = throughput_map.find( handler.serving_cell_id );
++  if( cell == throughput_map.end() ) {
++    cout << "[ERROR] Prediction for UE \"" << handler.ue_id << "\" names no serving cell; no CONTROL" << endl;
++    return;
++  }
+   serving_cell_throughput = cell->second;
+ 
+    // Iterating to identify the highest throughput prediction
+@@ -737,7 +828,7 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
+     if ( ts_control_api == TsControlApi::REST ) {
+       send_rest_control_request( handler.ue_id, handler.serving_cell_id, highest_throughput_cell_id );
+     } else {
+-      send_grpc_control_request( handler.ue_id, highest_throughput_cell_id );
++      send_grpc_control_request( handler.ue_id, handler.serving_cell_id, highest_throughput_cell_id );
+     }
+ 
+   } else {
+@@ -902,6 +993,21 @@ extern int main( int argc, char** argv ) {
+       cout << "[ERROR] unable to map cells to nodeb\n";
+     }
+ 
++    influx.url = config->Get_control_str("influx_url");
++    influx.org = config->Get_control_str("influx_org");
++    influx.bucket = config->Get_control_str("influx_bucket");
++    influx.token = config->Get_control_str("influx_token");
++    if( influx.bucket.find_first_of( "\"\\" ) != string::npos ) {
++      cout << "[ERROR] influx_bucket contains a quote or a backslash; ignored\n";
++      influx.bucket.clear();
++    }
++    if( influx.ok() ) {
++      cout << "[INFO] Influx " << influx.url << " org " << influx.org << " bucket " << influx.bucket
++           << ": token set\n";
++    } else {
++      cout << "[ERROR] Influx is not configured in the descriptor controls; no RIC CONTROL will be sent\n";
++    }
++
+     channel = grpc::CreateChannel(ts_control_ep, grpc::InsecureChannelCredentials());
+     rc_stub = rc::MsgComm::NewStub(channel, grpc::StubOptions());
+   }

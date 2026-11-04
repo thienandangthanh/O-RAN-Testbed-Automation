@@ -1,0 +1,66 @@
+diff --git a/src/ts_xapp/en_gnb_ue_id_test.cpp b/src/ts_xapp/en_gnb_ue_id_test.cpp
+new file mode 100644
+index 0000000..255c230
+--- /dev/null
++++ b/src/ts_xapp/en_gnb_ue_id_test.cpp
+@@ -0,0 +1,60 @@
++/*
++    Mnemonic:	en_gnb_ue_id_test.cpp
++    Abstract:	Unit test of parse_en_gnb_ue_id (en_gnb_ue_id.hpp): valid tags, values out of range and tags of
++                another form. Built and run by `make` (src/ts_xapp/CMakeLists.txt), so the image build fails
++                when it fails. Prints PASS/FAIL <tag>; exit 0 only if every case passes.
++*/
++
++#include <cstdio>
++#include <string>
++
++#include "en_gnb_ue_id.hpp"
++
++static int failures = 0;
++
++static void valid( const std::string &tag, int64_t x2, const char *plmn, const char *macro ) {
++  ts::EnGnbUeId id;
++  std::string why;
++  bool ok = ts::parse_en_gnb_ue_id( tag, id, why ) && id.m_enb_ue_x2ap_id == x2 && id.global_enb_plmn == plmn &&
++            id.global_enb_macro_id == macro;
++  printf( "%s valid %s%s%s\n", ok ? "PASS" : "FAIL", tag.c_str(), why.empty() ? "" : ": ", why.c_str() );
++  failures += ok ? 0 : 1;
++}
++
++static void refused( const std::string &tag ) {
++  ts::EnGnbUeId id;
++  std::string why;
++  bool ok = !ts::parse_en_gnb_ue_id( tag, id, why ) && !why.empty();
++  printf( "%s refused \"%s\": %s\n", ok ? "PASS" : "FAIL", tag.c_str(), why.c_str() );
++  failures += ok ? 0 : 1;
++}
++
++int main() {
++  valid( "enGnbUeId:5@00F110-00001", 5, "00F110", "00001" );
++  valid( "enGnbUeId:0@00F110-00001", 0, "00F110", "00001" );
++  valid( "enGnbUeId:4095@00F110-FFFFF", 4095, "00F110", "FFFFF" );
++
++  // out of range
++  refused( "enGnbUeId:4096@00F110-00001" );
++  refused( "enGnbUeId:99999@00F110-00001" );
++  refused( "enGnbUeId:5@00F110-100000" );   // 21 bits
++  // wrong form
++  refused( "" );
++  refused( "1" );                            // a bare IMSI
++  refused( "gnbUeId:5@00F110-00001" );
++  refused( "enbUeId:5@00F110" );
++  refused( "enGnbUeId:@00F110-00001" );
++  refused( "enGnbUeId:-5@00F110-00001" );
++  refused( "enGnbUeId:05@00F110-00001" );    // leading zero
++  refused( "enGnbUeId:5a@00F110-00001" );
++  refused( "enGnbUeId:5@00f110-00001" );     // lowercase hex
++  refused( "enGnbUeId:5@0F110-00001" );      // 5-digit PLMN
++  refused( "enGnbUeId:5@00F110-0001" );      // 4-digit macro
++  refused( "enGnbUeId:5@00F110-00001 " );
++  refused( "enGnbUeId:5@00F110" );
++  refused( "enGnbUeId:5-00F110@00001" );
++  refused( "enGnbUeId:5@00F110-000-1" );
++
++  printf( "en_gnb_ue_id_test: %s\n", failures ? "FAIL" : "ok" );
++  return failures ? 1 : 0;
++}

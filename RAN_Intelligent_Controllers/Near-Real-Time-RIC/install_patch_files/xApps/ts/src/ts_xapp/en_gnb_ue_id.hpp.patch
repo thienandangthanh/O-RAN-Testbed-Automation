@@ -1,0 +1,92 @@
+diff --git a/src/ts_xapp/en_gnb_ue_id.hpp b/src/ts_xapp/en_gnb_ue_id.hpp
+new file mode 100644
+index 0000000..700d2b0
+--- /dev/null
++++ b/src/ts_xapp/en_gnb_ue_id.hpp
+@@ -0,0 +1,86 @@
++/*
++    Mnemonic:	en_gnb_ue_id.hpp
++    Abstract:	The RC UE ID en-gNB-UEID of a UE, read from the ueId tag that kpimon writes on its UeMetrics
++                points: "enGnbUeId:<m-eNB-UE-X2AP-ID>@<PLMN identity>-<macro eNB ID>", where the X2AP ID is
++                decimal 0..4095 without leading zeros (ENB-UE-X2AP-ID, 3GPP TS 36.423 9.2.24), the PLMN identity
++                is 6 uppercase hex digits and the macro eNB ID is 5 uppercase hex digits (20 bits). Any other
++                form names no en-gNB-UEID. Header only, without dependencies, so that the unit test
++                (en_gnb_ue_id_test.cpp) builds on its own.
++*/
++
++#ifndef _EN_GNB_UE_ID_HPP
++#define _EN_GNB_UE_ID_HPP
++
++#include <cstdint>
++#include <string>
++
++namespace ts {
++
++struct EnGnbUeId {
++  int64_t m_enb_ue_x2ap_id = 0;   // 0..4095
++  std::string global_enb_plmn;    // 6 uppercase hex digits
++  std::string global_enb_macro_id;  // 5 uppercase hex digits
++};
++
++namespace detail {
++inline bool upper_hex( const std::string &s, size_t len ) {
++  if( s.size() != len ) return false;
++  for( char c : s ) {
++    if( !( ( c >= '0' && c <= '9' ) || ( c >= 'A' && c <= 'F' ) ) ) return false;
++  }
++  return true;
++}
++}  // namespace detail
++
++/*
++    Parses a ueId tag. Returns true and fills out for an en-gNB-UEID tag of exactly the form above; otherwise
++    returns false and writes the reason to why.
++*/
++inline bool parse_en_gnb_ue_id( const std::string &tag, EnGnbUeId &out, std::string &why ) {
++  static const std::string prefix = "enGnbUeId:";
++  if( tag.compare( 0, prefix.size(), prefix ) != 0 ) {
++    why = "not an en-gNB-UEID tag (no \"" + prefix + "\" prefix)";
++    return false;
++  }
++  const size_t at = tag.find( '@', prefix.size() );
++  const size_t dash = at == std::string::npos ? std::string::npos : tag.find( '-', at + 1 );
++  if( at == std::string::npos || dash == std::string::npos ) {
++    why = "not of the form enGnbUeId:<x2ap>@<plmn>-<macro>";
++    return false;
++  }
++  const std::string x2 = tag.substr( prefix.size(), at - prefix.size() );
++  const std::string plmn = tag.substr( at + 1, dash - at - 1 );
++  const std::string macro = tag.substr( dash + 1 );
++  if( x2.empty() || x2.size() > 4 || ( x2.size() > 1 && x2[0] == '0' ) ) {
++    why = "m-eNB-UE-X2AP-ID \"" + x2 + "\" is not a decimal number without leading zeros";
++    return false;
++  }
++  int64_t v = 0;
++  for( char c : x2 ) {
++    if( c < '0' || c > '9' ) {
++      why = "m-eNB-UE-X2AP-ID \"" + x2 + "\" is not decimal";
++      return false;
++    }
++    v = v * 10 + ( c - '0' );
++  }
++  if( v > 4095 ) {
++    why = "m-eNB-UE-X2AP-ID " + x2 + " is outside 0..4095";
++    return false;
++  }
++  if( !detail::upper_hex( plmn, 6 ) ) {
++    why = "PLMN identity \"" + plmn + "\" is not 6 uppercase hex digits";
++    return false;
++  }
++  if( !detail::upper_hex( macro, 5 ) ) {
++    why = "macro eNB ID \"" + macro + "\" is not 5 uppercase hex digits";
++    return false;
++  }
++  out.m_enb_ue_x2ap_id = v;
++  out.global_enb_plmn = plmn;
++  out.global_enb_macro_id = macro;
++  return true;
++}
++
++}  // namespace ts
++
++#endif
