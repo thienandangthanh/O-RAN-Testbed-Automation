@@ -92,8 +92,9 @@ fi
 # "payload", which the TS xApp reads only as an object (the threshold would never be set); rtmgr routes RIC control
 # acks (12041/12042) at subid -1 to every xApp, and xapp-frame-cpp 2.3.6 frees an unmatched buffer twice (glibc
 # aborts the pod) unless a do-nothing default handler is registered; and the cell map takes keys only from NR nodes
-# (en_gnb_/gnb_ meids), read from the hex of the binary X2 request part (only NR cells are PSCell targets, 3GPP TS
-# 37.340 10.5.1). Restoring first rewrites the sources, so the image below is rebuilt from the patched tree.
+# (en_gnb_/gnb_ meids), read from the hex text of the X2 request part that e2mgr keeps (only NR cells are PSCell
+# targets, 3GPP TS 37.340 10.5.1). Restoring first rewrites the sources, so the image below is rebuilt from the
+# patched tree.
 TS_PATCH_DIR="$PARENT_DIR/install_patch_files/xApps/ts"
 mapfile -t TS_PATCHES < <(grep -vE '^\s*(#|$)' "$TS_PATCH_DIR/patches.manifest")
 if [ "${#TS_PATCHES[@]}" -eq 0 ]; then

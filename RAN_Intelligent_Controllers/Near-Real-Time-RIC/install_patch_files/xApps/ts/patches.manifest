@@ -7,5 +7,5 @@
 src/ts_xapp/ts_xapp.cpp.patch
 # do-nothing default RMR handler (a stray 12041/12042 is otherwise freed twice by xapp-frame-cpp 2.3.6)
 src/ts_xapp/ts_xapp.cpp.default_handler.patch
-# cell keys only from NR nodes (en_gnb_/gnb_ meids), read from the hex of the binary X2 request part
+# cell keys only from NR nodes (en_gnb_/gnb_ meids), read from the hex text of the X2 request part that e2mgr keeps
 src/ts_xapp/ts_xapp.cpp.nr_cell_map.patch
