@@ -9,3 +9,8 @@ src/ts_xapp/ts_xapp.cpp.patch
 src/ts_xapp/ts_xapp.cpp.default_handler.patch
 # cell keys only from NR nodes (en_gnb_/gnb_ meids), read from the hex text of the X2 request part that e2mgr keeps
 src/ts_xapp/ts_xapp.cpp.nr_cell_map.patch
+# gRPC UeId field 2 enGNBUEID (the RC UE ID en-gNB-UEID): rc.proto as rc patch 0003 has it, and rc.pb.cc/rc.pb.h
+# generated from it by protoc 3.6.1 (the toolchain of the committed files; rc.grpc.pb.* are unchanged)
+ext/protobuf/rc.proto.patch
+ext/protobuf/rc.pb.cc.patch
+ext/protobuf/rc.pb.h.patch

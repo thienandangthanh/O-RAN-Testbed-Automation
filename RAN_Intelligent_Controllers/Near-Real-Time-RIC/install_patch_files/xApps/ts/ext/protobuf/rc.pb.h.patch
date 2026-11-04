@@ -1,0 +1,428 @@
+diff --git a/ext/protobuf/rc.pb.h b/ext/protobuf/rc.pb.h
+index 1aa7814b435849e599dd5a99553cb1897e3e5b35..1639d056d1b21aeba001318fb204a5b071abf46c 100644
+--- a/ext/protobuf/rc.pb.h
++++ b/ext/protobuf/rc.pb.h
+@@ -39,7 +39,7 @@ namespace protobuf_rc_2eproto {
+ struct TableStruct {
+   static const ::google::protobuf::internal::ParseTableField entries[];
+   static const ::google::protobuf::internal::AuxillaryParseTableField aux[];
+-  static const ::google::protobuf::internal::ParseTable schema[8];
++  static const ::google::protobuf::internal::ParseTable schema[9];
+   static const ::google::protobuf::internal::FieldMetadata field_metadata[];
+   static const ::google::protobuf::internal::SerializationTable serialization_table[];
+   static const ::google::protobuf::uint32 offsets[];
+@@ -68,6 +68,9 @@ extern RicControlGrpcRspDefaultTypeInternal _RicControlGrpcRsp_default_instance_
+ class UeId;
+ class UeIdDefaultTypeInternal;
+ extern UeIdDefaultTypeInternal _UeId_default_instance_;
++class enGNBUEID;
++class enGNBUEIDDefaultTypeInternal;
++extern enGNBUEIDDefaultTypeInternal _enGNBUEID_default_instance_;
+ class gNBUEID;
+ class gNBUEIDDefaultTypeInternal;
+ extern gNBUEIDDefaultTypeInternal _gNBUEID_default_instance_;
+@@ -81,6 +84,7 @@ template<> ::rc::RICE2APHeader* Arena::CreateMaybeMessage<::rc::RICE2APHeader>(A
+ template<> ::rc::RicControlGrpcReq* Arena::CreateMaybeMessage<::rc::RicControlGrpcReq>(Arena*);
+ template<> ::rc::RicControlGrpcRsp* Arena::CreateMaybeMessage<::rc::RicControlGrpcRsp>(Arena*);
+ template<> ::rc::UeId* Arena::CreateMaybeMessage<::rc::UeId>(Arena*);
++template<> ::rc::enGNBUEID* Arena::CreateMaybeMessage<::rc::enGNBUEID>(Arena*);
+ template<> ::rc::gNBUEID* Arena::CreateMaybeMessage<::rc::gNBUEID>(Arena*);
+ }  // namespace protobuf
+ }  // namespace google
+@@ -465,11 +469,157 @@ class UeId : public ::google::protobuf::Message /* @@protoc_insertion_point(clas
+   ::rc::gNBUEID* mutable_gnbueid();
+   void set_allocated_gnbueid(::rc::gNBUEID* gnbueid);
+ 
++  // .rc.enGNBUEID EnGnbUEID = 2;
++  bool has_engnbueid() const;
++  void clear_engnbueid();
++  static const int kEnGnbUEIDFieldNumber = 2;
++  private:
++  const ::rc::enGNBUEID& _internal_engnbueid() const;
++  public:
++  const ::rc::enGNBUEID& engnbueid() const;
++  ::rc::enGNBUEID* release_engnbueid();
++  ::rc::enGNBUEID* mutable_engnbueid();
++  void set_allocated_engnbueid(::rc::enGNBUEID* engnbueid);
++
+   // @@protoc_insertion_point(class_scope:rc.UeId)
+  private:
+ 
+   ::google::protobuf::internal::InternalMetadataWithArena _internal_metadata_;
+   ::rc::gNBUEID* gnbueid_;
++  ::rc::enGNBUEID* engnbueid_;
++  mutable ::google::protobuf::internal::CachedSize _cached_size_;
++  friend struct ::protobuf_rc_2eproto::TableStruct;
++};
++// -------------------------------------------------------------------
++
++class enGNBUEID : public ::google::protobuf::Message /* @@protoc_insertion_point(class_definition:rc.enGNBUEID) */ {
++ public:
++  enGNBUEID();
++  virtual ~enGNBUEID();
++
++  enGNBUEID(const enGNBUEID& from);
++
++  inline enGNBUEID& operator=(const enGNBUEID& from) {
++    CopyFrom(from);
++    return *this;
++  }
++  #if LANG_CXX11
++  enGNBUEID(enGNBUEID&& from) noexcept
++    : enGNBUEID() {
++    *this = ::std::move(from);
++  }
++
++  inline enGNBUEID& operator=(enGNBUEID&& from) noexcept {
++    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
++      if (this != &from) InternalSwap(&from);
++    } else {
++      CopyFrom(from);
++    }
++    return *this;
++  }
++  #endif
++  static const ::google::protobuf::Descriptor* descriptor();
++  static const enGNBUEID& default_instance();
++
++  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
++  static inline const enGNBUEID* internal_default_instance() {
++    return reinterpret_cast<const enGNBUEID*>(
++               &_enGNBUEID_default_instance_);
++  }
++  static constexpr int kIndexInFileMessages =
++    3;
++
++  void Swap(enGNBUEID* other);
++  friend void swap(enGNBUEID& a, enGNBUEID& b) {
++    a.Swap(&b);
++  }
++
++  // implements Message ----------------------------------------------
++
++  inline enGNBUEID* New() const final {
++    return CreateMaybeMessage<enGNBUEID>(NULL);
++  }
++
++  enGNBUEID* New(::google::protobuf::Arena* arena) const final {
++    return CreateMaybeMessage<enGNBUEID>(arena);
++  }
++  void CopyFrom(const ::google::protobuf::Message& from) final;
++  void MergeFrom(const ::google::protobuf::Message& from) final;
++  void CopyFrom(const enGNBUEID& from);
++  void MergeFrom(const enGNBUEID& from);
++  void Clear() final;
++  bool IsInitialized() const final;
++
++  size_t ByteSizeLong() const final;
++  bool MergePartialFromCodedStream(
++      ::google::protobuf::io::CodedInputStream* input) final;
++  void SerializeWithCachedSizes(
++      ::google::protobuf::io::CodedOutputStream* output) const final;
++  ::google::protobuf::uint8* InternalSerializeWithCachedSizesToArray(
++      bool deterministic, ::google::protobuf::uint8* target) const final;
++  int GetCachedSize() const final { return _cached_size_.Get(); }
++
++  private:
++  void SharedCtor();
++  void SharedDtor();
++  void SetCachedSize(int size) const final;
++  void InternalSwap(enGNBUEID* other);
++  private:
++  inline ::google::protobuf::Arena* GetArenaNoVirtual() const {
++    return NULL;
++  }
++  inline void* MaybeArenaPtr() const {
++    return NULL;
++  }
++  public:
++
++  ::google::protobuf::Metadata GetMetadata() const final;
++
++  // nested types ----------------------------------------------------
++
++  // accessors -------------------------------------------------------
++
++  // string globalEnbPlmn = 2;
++  void clear_globalenbplmn();
++  static const int kGlobalEnbPlmnFieldNumber = 2;
++  const ::std::string& globalenbplmn() const;
++  void set_globalenbplmn(const ::std::string& value);
++  #if LANG_CXX11
++  void set_globalenbplmn(::std::string&& value);
++  #endif
++  void set_globalenbplmn(const char* value);
++  void set_globalenbplmn(const char* value, size_t size);
++  ::std::string* mutable_globalenbplmn();
++  ::std::string* release_globalenbplmn();
++  void set_allocated_globalenbplmn(::std::string* globalenbplmn);
++
++  // string globalEnbMacroId = 3;
++  void clear_globalenbmacroid();
++  static const int kGlobalEnbMacroIdFieldNumber = 3;
++  const ::std::string& globalenbmacroid() const;
++  void set_globalenbmacroid(const ::std::string& value);
++  #if LANG_CXX11
++  void set_globalenbmacroid(::std::string&& value);
++  #endif
++  void set_globalenbmacroid(const char* value);
++  void set_globalenbmacroid(const char* value, size_t size);
++  ::std::string* mutable_globalenbmacroid();
++  ::std::string* release_globalenbmacroid();
++  void set_allocated_globalenbmacroid(::std::string* globalenbmacroid);
++
++  // int64 mEnbUeX2apId = 1;
++  void clear_menbuex2apid();
++  static const int kMEnbUeX2ApIdFieldNumber = 1;
++  ::google::protobuf::int64 menbuex2apid() const;
++  void set_menbuex2apid(::google::protobuf::int64 value);
++
++  // @@protoc_insertion_point(class_scope:rc.enGNBUEID)
++ private:
++
++  ::google::protobuf::internal::InternalMetadataWithArena _internal_metadata_;
++  ::google::protobuf::internal::ArenaStringPtr globalenbplmn_;
++  ::google::protobuf::internal::ArenaStringPtr globalenbmacroid_;
++  ::google::protobuf::int64 menbuex2apid_;
+   mutable ::google::protobuf::internal::CachedSize _cached_size_;
+   friend struct ::protobuf_rc_2eproto::TableStruct;
+ };
+@@ -510,7 +660,7 @@ class gNBUEID : public ::google::protobuf::Message /* @@protoc_insertion_point(c
+                &_gNBUEID_default_instance_);
+   }
+   static constexpr int kIndexInFileMessages =
+-    3;
++    4;
+ 
+   void Swap(gNBUEID* other);
+   friend void swap(gNBUEID& a, gNBUEID& b) {
+@@ -654,7 +804,7 @@ class Guami : public ::google::protobuf::Message /* @@protoc_insertion_point(cla
+                &_Guami_default_instance_);
+   }
+   static constexpr int kIndexInFileMessages =
+-    4;
++    5;
+ 
+   void Swap(Guami* other);
+   friend void swap(Guami& a, Guami& b) {
+@@ -810,7 +960,7 @@ class RICControlMessage : public ::google::protobuf::Message /* @@protoc_inserti
+                &_RICControlMessage_default_instance_);
+   }
+   static constexpr int kIndexInFileMessages =
+-    5;
++    6;
+ 
+   void Swap(RICControlMessage* other);
+   friend void swap(RICControlMessage& a, RICControlMessage& b) {
+@@ -928,7 +1078,7 @@ class RicControlGrpcReq : public ::google::protobuf::Message /* @@protoc_inserti
+                &_RicControlGrpcReq_default_instance_);
+   }
+   static constexpr int kIndexInFileMessages =
+-    6;
++    7;
+ 
+   void Swap(RicControlGrpcReq* other);
+   friend void swap(RicControlGrpcReq& a, RicControlGrpcReq& b) {
+@@ -1115,7 +1265,7 @@ class RicControlGrpcRsp : public ::google::protobuf::Message /* @@protoc_inserti
+                &_RicControlGrpcRsp_default_instance_);
+   }
+   static constexpr int kIndexInFileMessages =
+-    7;
++    8;
+ 
+   void Swap(RicControlGrpcRsp* other);
+   friend void swap(RicControlGrpcRsp& a, RicControlGrpcRsp& b) {
+@@ -1379,6 +1529,184 @@ inline void UeId::set_allocated_gnbueid(::rc::gNBUEID* gnbueid) {
+   // @@protoc_insertion_point(field_set_allocated:rc.UeId.GnbUEID)
+ }
+ 
++// .rc.enGNBUEID EnGnbUEID = 2;
++inline bool UeId::has_engnbueid() const {
++  return this != internal_default_instance() && engnbueid_ != NULL;
++}
++inline void UeId::clear_engnbueid() {
++  if (GetArenaNoVirtual() == NULL && engnbueid_ != NULL) {
++    delete engnbueid_;
++  }
++  engnbueid_ = NULL;
++}
++inline const ::rc::enGNBUEID& UeId::_internal_engnbueid() const {
++  return *engnbueid_;
++}
++inline const ::rc::enGNBUEID& UeId::engnbueid() const {
++  const ::rc::enGNBUEID* p = engnbueid_;
++  // @@protoc_insertion_point(field_get:rc.UeId.EnGnbUEID)
++  return p != NULL ? *p : *reinterpret_cast<const ::rc::enGNBUEID*>(
++      &::rc::_enGNBUEID_default_instance_);
++}
++inline ::rc::enGNBUEID* UeId::release_engnbueid() {
++  // @@protoc_insertion_point(field_release:rc.UeId.EnGnbUEID)
++  
++  ::rc::enGNBUEID* temp = engnbueid_;
++  engnbueid_ = NULL;
++  return temp;
++}
++inline ::rc::enGNBUEID* UeId::mutable_engnbueid() {
++  
++  if (engnbueid_ == NULL) {
++    auto* p = CreateMaybeMessage<::rc::enGNBUEID>(GetArenaNoVirtual());
++    engnbueid_ = p;
++  }
++  // @@protoc_insertion_point(field_mutable:rc.UeId.EnGnbUEID)
++  return engnbueid_;
++}
++inline void UeId::set_allocated_engnbueid(::rc::enGNBUEID* engnbueid) {
++  ::google::protobuf::Arena* message_arena = GetArenaNoVirtual();
++  if (message_arena == NULL) {
++    delete engnbueid_;
++  }
++  if (engnbueid) {
++    ::google::protobuf::Arena* submessage_arena = NULL;
++    if (message_arena != submessage_arena) {
++      engnbueid = ::google::protobuf::internal::GetOwnedMessage(
++          message_arena, engnbueid, submessage_arena);
++    }
++    
++  } else {
++    
++  }
++  engnbueid_ = engnbueid;
++  // @@protoc_insertion_point(field_set_allocated:rc.UeId.EnGnbUEID)
++}
++
++// -------------------------------------------------------------------
++
++// enGNBUEID
++
++// int64 mEnbUeX2apId = 1;
++inline void enGNBUEID::clear_menbuex2apid() {
++  menbuex2apid_ = GOOGLE_LONGLONG(0);
++}
++inline ::google::protobuf::int64 enGNBUEID::menbuex2apid() const {
++  // @@protoc_insertion_point(field_get:rc.enGNBUEID.mEnbUeX2apId)
++  return menbuex2apid_;
++}
++inline void enGNBUEID::set_menbuex2apid(::google::protobuf::int64 value) {
++  
++  menbuex2apid_ = value;
++  // @@protoc_insertion_point(field_set:rc.enGNBUEID.mEnbUeX2apId)
++}
++
++// string globalEnbPlmn = 2;
++inline void enGNBUEID::clear_globalenbplmn() {
++  globalenbplmn_.ClearToEmptyNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
++}
++inline const ::std::string& enGNBUEID::globalenbplmn() const {
++  // @@protoc_insertion_point(field_get:rc.enGNBUEID.globalEnbPlmn)
++  return globalenbplmn_.GetNoArena();
++}
++inline void enGNBUEID::set_globalenbplmn(const ::std::string& value) {
++  
++  globalenbplmn_.SetNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), value);
++  // @@protoc_insertion_point(field_set:rc.enGNBUEID.globalEnbPlmn)
++}
++#if LANG_CXX11
++inline void enGNBUEID::set_globalenbplmn(::std::string&& value) {
++  
++  globalenbplmn_.SetNoArena(
++    &::google::protobuf::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
++  // @@protoc_insertion_point(field_set_rvalue:rc.enGNBUEID.globalEnbPlmn)
++}
++#endif
++inline void enGNBUEID::set_globalenbplmn(const char* value) {
++  GOOGLE_DCHECK(value != NULL);
++  
++  globalenbplmn_.SetNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
++  // @@protoc_insertion_point(field_set_char:rc.enGNBUEID.globalEnbPlmn)
++}
++inline void enGNBUEID::set_globalenbplmn(const char* value, size_t size) {
++  
++  globalenbplmn_.SetNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited(),
++      ::std::string(reinterpret_cast<const char*>(value), size));
++  // @@protoc_insertion_point(field_set_pointer:rc.enGNBUEID.globalEnbPlmn)
++}
++inline ::std::string* enGNBUEID::mutable_globalenbplmn() {
++  
++  // @@protoc_insertion_point(field_mutable:rc.enGNBUEID.globalEnbPlmn)
++  return globalenbplmn_.MutableNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
++}
++inline ::std::string* enGNBUEID::release_globalenbplmn() {
++  // @@protoc_insertion_point(field_release:rc.enGNBUEID.globalEnbPlmn)
++  
++  return globalenbplmn_.ReleaseNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
++}
++inline void enGNBUEID::set_allocated_globalenbplmn(::std::string* globalenbplmn) {
++  if (globalenbplmn != NULL) {
++    
++  } else {
++    
++  }
++  globalenbplmn_.SetAllocatedNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), globalenbplmn);
++  // @@protoc_insertion_point(field_set_allocated:rc.enGNBUEID.globalEnbPlmn)
++}
++
++// string globalEnbMacroId = 3;
++inline void enGNBUEID::clear_globalenbmacroid() {
++  globalenbmacroid_.ClearToEmptyNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
++}
++inline const ::std::string& enGNBUEID::globalenbmacroid() const {
++  // @@protoc_insertion_point(field_get:rc.enGNBUEID.globalEnbMacroId)
++  return globalenbmacroid_.GetNoArena();
++}
++inline void enGNBUEID::set_globalenbmacroid(const ::std::string& value) {
++  
++  globalenbmacroid_.SetNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), value);
++  // @@protoc_insertion_point(field_set:rc.enGNBUEID.globalEnbMacroId)
++}
++#if LANG_CXX11
++inline void enGNBUEID::set_globalenbmacroid(::std::string&& value) {
++  
++  globalenbmacroid_.SetNoArena(
++    &::google::protobuf::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
++  // @@protoc_insertion_point(field_set_rvalue:rc.enGNBUEID.globalEnbMacroId)
++}
++#endif
++inline void enGNBUEID::set_globalenbmacroid(const char* value) {
++  GOOGLE_DCHECK(value != NULL);
++  
++  globalenbmacroid_.SetNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
++  // @@protoc_insertion_point(field_set_char:rc.enGNBUEID.globalEnbMacroId)
++}
++inline void enGNBUEID::set_globalenbmacroid(const char* value, size_t size) {
++  
++  globalenbmacroid_.SetNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited(),
++      ::std::string(reinterpret_cast<const char*>(value), size));
++  // @@protoc_insertion_point(field_set_pointer:rc.enGNBUEID.globalEnbMacroId)
++}
++inline ::std::string* enGNBUEID::mutable_globalenbmacroid() {
++  
++  // @@protoc_insertion_point(field_mutable:rc.enGNBUEID.globalEnbMacroId)
++  return globalenbmacroid_.MutableNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
++}
++inline ::std::string* enGNBUEID::release_globalenbmacroid() {
++  // @@protoc_insertion_point(field_release:rc.enGNBUEID.globalEnbMacroId)
++  
++  return globalenbmacroid_.ReleaseNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
++}
++inline void enGNBUEID::set_allocated_globalenbmacroid(::std::string* globalenbmacroid) {
++  if (globalenbmacroid != NULL) {
++    
++  } else {
++    
++  }
++  globalenbmacroid_.SetAllocatedNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), globalenbmacroid);
++  // @@protoc_insertion_point(field_set_allocated:rc.enGNBUEID.globalEnbMacroId)
++}
++
+ // -------------------------------------------------------------------
+ 
+ // gNBUEID
+@@ -2225,6 +2553,8 @@ inline void RicControlGrpcRsp::set_allocated_description(::std::string* descript
+ 
+ // -------------------------------------------------------------------
+ 
++// -------------------------------------------------------------------
++
+ 
+ // @@protoc_insertion_point(namespace_scope)
+ 

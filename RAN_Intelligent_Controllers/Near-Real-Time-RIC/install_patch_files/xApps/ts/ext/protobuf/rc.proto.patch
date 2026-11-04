@@ -1,0 +1,19 @@
+diff --git a/ext/protobuf/rc.proto b/ext/protobuf/rc.proto
+index 9c7ca7a68e12327651a13572ad23555695326a72..ecf9a868c878b646ca6723e157894ea6076bef75 100644
+--- a/ext/protobuf/rc.proto
++++ b/ext/protobuf/rc.proto
+@@ -29,6 +29,14 @@ message RICControlHeader {
+ 
+ message UeId {
+ 	gNBUEID         GnbUEID = 1;
++	enGNBUEID       EnGnbUEID = 2;  // exactly one of GnbUEID and EnGnbUEID is set (E2SM 6.2.2.6 CHOICE UE ID)
++}
++
++// en-gNB-UEID (E2SM 6.2.2.6): the UE ID at an en-gNB connected to EPC with EN-DC established.
++message enGNBUEID {
++	int64           mEnbUeX2apId = 1;      // MeNB UE X2AP ID, INTEGER (0..4095) (3GPP TS 36.423 9.2.24)
++	string          globalEnbPlmn = 2;     // Global eNB ID PLMN Identity, 3 octets as 6 hex digits
++	string          globalEnbMacroId = 3;  // Global eNB ID macro eNB ID, BIT STRING (SIZE(20)) as 5 hex digits
+ }
+ 
+ message gNBUEID {
