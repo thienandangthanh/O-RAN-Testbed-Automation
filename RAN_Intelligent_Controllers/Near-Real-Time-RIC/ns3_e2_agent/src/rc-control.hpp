@@ -1,16 +1,23 @@
-// RC control path: an inbound RICcontrolRequest (E2SM-RC CONTROL style 3
-// "Connected Mode Mobility", action 1 "Handover Control") is checked and
-// decoded here, forwarded to ns-3 as an ns3-e2-ipc `control` line, and
+// RC control path: an inbound RICcontrolRequest (E2SM-RC CONTROL Style 5
+// "Dual Connectivity control", action 3 "DC PSCell Change control", header
+// UE ID en-gNB-UEID) is checked and decoded here, forwarded to ns-3 as an
+// ns3-e2-ipc `control` line naming the UE by {mEnbUeX2apId, mnCellId}, and
 // answered on the E2 association once ns-3's `controlAck` arrives:
 //   applied             -> RICcontrolAcknowledge with E2SM-RC ControlOutcome
 //                          Format 1 (empty ranP-List), unless Ack Request = NoAck;
 //   refused (ns-3), late,
 //   ns-3 gone (bye/EOF) -> RICcontrolFailure ricRequest control-failed-to-execute.
 // Agent-local rejects (no IPC line, answered at once):
-//   RAN function != 3                -> ran-function-id-invalid;
-//   E2SM-RC decode error, or a target
-//   that is not a strict NR CGI      -> control-message-invalid;
-//   style/action != 3/1              -> action-not-supported;
+//   RAN function != 3, or any control on
+//   a node that does not announce RAN
+//   function 3 (the eNB)             -> ran-function-id-invalid;
+//   E2SM-RC decode error             -> control-message-invalid;
+//   style/action != 5/3              -> action-not-supported;
+//   a UE ID that is not en-gNB-UEID with
+//   a macro eNB ID, an optional member,
+//   a UE ID PLMN other than this node's,
+//   or a target that is not a strict
+//   NR CGI                           -> control-message-invalid;
 //   ns-3 not connected               -> control-failed-to-execute.
 // Pending controls are keyed by an agent-monotonic ctlId and have no
 // wall-clock timer: every request gets exactly one terminal answer.
@@ -31,8 +38,8 @@
 namespace agent {
 
 constexpr long kRcRanFunctionId = 3;
-constexpr long kRcStyleConnectedModeMobility = 3;
-constexpr long kRcActionHandoverControl = 1;
+constexpr long kRcStyleDualConnectivity = 5;   // E2SM-RC v03.00 7.6.6.1
+constexpr long kRcActionDcPscellChange = 3;
 
 // The target cell of RAN parameter 4 (NR CGI): the APER NR-CGI, decoded strictly
 // (9 octets that re-encode to themselves, rcc_decode_nr_cgi_strict), with this
@@ -57,7 +64,9 @@ class RcControlPath {
   using SendE2 = std::function<void(const Bytes &pdu, const char *what)>;
   using SendIpc = std::function<bool(const std::string &line)>;  // false: not sent
 
-  RcControlPath(int nodeId, const std::array<uint8_t, 3> &plmn, SendE2 sendE2, SendIpc sendIpc);
+  // rcAnnounced: the node announces RAN function 3 (a gNB); on the eNB every control is refused
+  // ran-function-id-invalid.
+  RcControlPath(int nodeId, const std::array<uint8_t, 3> &plmn, bool rcAnnounced, SendE2 sendE2, SendIpc sendIpc);
 
   // A RICcontrolRequest. afterSeq is the last sample seq received from ns-3;
   // ipcUp is true while ns-3 is connected and its hello was accepted.
@@ -77,6 +86,7 @@ class RcControlPath {
 
   int nodeId_;
   std::array<uint8_t, 3> plmn_;
+  bool rcAnnounced_;
   SendE2 sendE2_;
   SendIpc sendIpc_;
   uint64_t nextCtlId_ = 1;

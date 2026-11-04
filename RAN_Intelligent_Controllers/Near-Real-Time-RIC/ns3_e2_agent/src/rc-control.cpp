@@ -48,8 +48,10 @@ bool parse_target_nr_cgi(const uint8_t *o, size_t n, const std::array<uint8_t, 3
   return true;
 }
 
-RcControlPath::RcControlPath(int nodeId, const std::array<uint8_t, 3> &plmn, SendE2 sendE2, SendIpc sendIpc)
-    : nodeId_(nodeId), plmn_(plmn), sendE2_(std::move(sendE2)), sendIpc_(std::move(sendIpc)) {}
+RcControlPath::RcControlPath(int nodeId, const std::array<uint8_t, 3> &plmn, bool rcAnnounced, SendE2 sendE2,
+                             SendIpc sendIpc)
+    : nodeId_(nodeId), plmn_(plmn), rcAnnounced_(rcAnnounced), sendE2_(std::move(sendE2)),
+      sendIpc_(std::move(sendIpc)) {}
 
 void RcControlPath::on_request(const InboundPdu &p, int64_t afterSeq, bool ipcUp) {
   stats().ctlRx++;
@@ -60,9 +62,10 @@ void RcControlPath::on_request(const InboundPdu &p, int64_t afterSeq, bool ipcUp
   c.hasCallProcessId = p.hasCallProcessId;
   c.callProcessId = p.callProcessId;
   c.noAck = p.controlAckRequest == 0;  // RICcontrolAckRequest: 0 = noAck, 1 = ack
-  if (p.ranFuncId != kRcRanFunctionId) {
+  if (!rcAnnounced_ || p.ranFuncId != kRcRanFunctionId) {
     stats().ctlRejFunc++;
-    answer_failure(c, CauseRICrequest_ran_function_id_invalid, "RAN function is not 3");
+    answer_failure(c, CauseRICrequest_ran_function_id_invalid,
+                   rcAnnounced_ ? "RAN function is not 3" : "this node does not announce RAN function 3");
     return;
   }
   rcc_control rc;
@@ -73,9 +76,19 @@ void RcControlPath::on_request(const InboundPdu &p, int64_t afterSeq, bool ipcUp
     answer_failure(c, CauseRICrequest_control_message_invalid, err);
     return;
   }
-  if (rc.style != kRcStyleConnectedModeMobility || rc.action != kRcActionHandoverControl) {
+  if (rc.style != kRcStyleDualConnectivity || rc.action != kRcActionDcPscellChange) {
     stats().ctlRejAction++;
-    answer_failure(c, CauseRICrequest_action_not_supported, "style/action is not 3/1");
+    answer_failure(c, CauseRICrequest_action_not_supported, "style/action is not 5/3");
+    return;
+  }
+  if (!rc.enGnbUeId) {
+    stats().ctlRejDecode++;
+    answer_failure(c, CauseRICrequest_control_message_invalid, rc.ueIdErr);
+    return;
+  }
+  if (memcmp(rc.globalEnbPlmn, plmn_.data(), 3) != 0) {
+    stats().ctlRejDecode++;
+    answer_failure(c, CauseRICrequest_control_message_invalid, "control header: en-gNB-UEID PLMN is not this node's");
     return;
   }
   TargetCell t;
@@ -91,7 +104,6 @@ void RcControlPath::on_request(const InboundPdu &p, int64_t afterSeq, bool ipcUp
     return;
   }
   uint64_t ctlId = nextCtlId_++;
-  // Recorded deviation P4: the AMF-UE-NGAP-ID carries the decimal IMSI.
   nlohmann::ordered_json j;
   j["type"] = "control";
   j["v"] = 1;
@@ -100,7 +112,7 @@ void RcControlPath::on_request(const InboundPdu &p, int64_t afterSeq, bool ipcUp
   j["ric"] = {{"requestorId", c.requestorId}, {"instanceId", c.instanceId}, {"ranFuncId", c.ranFuncId}};
   j["style"] = rc.style;
   j["action"] = rc.action;
-  j["imsi"] = rc.amfUeNgapId;
+  j["ueId"] = {{"mEnbUeX2apId", rc.mEnbUeX2apId}, {"mnCellId", rc.macroEnbId}};
   j["targetCellId"] = t.cellId;
   j["afterSeq"] = afterSeq;
   j["diag"] = {{"targetGnbId", t.gnbId}, {"rxUnixMs", unix_ms()}};
@@ -112,8 +124,8 @@ void RcControlPath::on_request(const InboundPdu &p, int64_t afterSeq, bool ipcUp
   pending_[ctlId] = c;
   stats().ctlForwarded++;
   stats().ctlPending = pending_.size();
-  ALOG_I("control %ld/%ld -> ns-3 ctlId %llu: imsi %llu target cell %u (gNB %u) afterSeq %lld", c.requestorId,
-         c.instanceId, (unsigned long long)ctlId, (unsigned long long)rc.amfUeNgapId, t.cellId, t.gnbId,
+  ALOG_I("control %ld/%ld -> ns-3 ctlId %llu: UE X2AP ID %u at MN %05X, target cell %u (gNB %u) afterSeq %lld",
+         c.requestorId, c.instanceId, (unsigned long long)ctlId, rc.mEnbUeX2apId, rc.macroEnbId, t.cellId, t.gnbId,
          (long long)afterSeq);
 }
 

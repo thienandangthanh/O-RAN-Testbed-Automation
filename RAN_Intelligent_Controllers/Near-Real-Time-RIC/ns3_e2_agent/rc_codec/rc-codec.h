@@ -21,17 +21,25 @@ extern "C" {
 typedef struct rcc_control {
   long style;                /* ric-Style-Type */
   long action;               /* ric-ControlAction-ID */
-  uint64_t amfUeNgapId;      /* UEID gNB-UEID amf-UE-NGAP-ID */
+  /* 1 when the UE ID is en-gNB-UEID {m-eNB-UE-X2AP-ID, globalENB-ID {pLMN-Identity, macro-eNB-ID}} and neither it
+   * nor the header carries an optional member (ric-ControlDecision, m-eNB-UE-X2AP-ID-Extension, gNB-CU-UE-F1AP-ID,
+   * gNB-CU-CP-UE-E1AP-ID-List, ran-UEID); then the three fields below are set. Otherwise 0 and ueIdErr says why. */
+  int enGnbUeId;
+  char ueIdErr[96];
+  uint32_t mEnbUeX2apId;     /* ENB-UE-X2AP-ID INTEGER (0..4095) */
+  uint8_t globalEnbPlmn[3];  /* globalENB-ID pLMN-Identity */
+  uint32_t macroEnbId;       /* globalENB-ID macro-eNB-ID, BIT STRING (SIZE(20)) */
   uint8_t targetOctets[16];  /* RAN parameter 4 (NR CGI) valueOctS under 1/2/3, checked by rcc_decode_nr_cgi_strict */
   size_t targetLen;
 } rcc_control;
 
 /*
  * Decodes the E2SM-RC control header and message (APER). Returns 0 when both
- * decode cleanly (RC_OK, every octet consumed), the header is Format 1 with a
- * gNB-UEID, and the message is Format 1 carrying Target Primary Cell ID (1) >
- * CHOICE Target Cell (2) > NR Cell (3) > NR CGI (4) as an octet string.
- * Otherwise returns -1 and writes the reason to err.
+ * decode cleanly (RC_OK, every octet consumed), the header is Format 1 and the
+ * message is Format 1 carrying RAN parameter 1 > 2 > 3 > 4 (NR CGI) as an octet
+ * string; style, action, the UE ID fields (enGnbUeId) and the target are then
+ * filled in. Any UE ID CHOICE decodes, so the caller judges the style and
+ * action before the UE ID. Otherwise returns -1 and writes the reason to err.
  */
 int rcc_decode_control(const uint8_t *hdr, size_t hdrLen, const uint8_t *msg, size_t msgLen,
                        rcc_control *out, char *err, size_t errLen);
@@ -46,8 +54,8 @@ int rcc_decode_nr_cgi_strict(const uint8_t *buf, size_t len, uint8_t plmn[3], ui
 
 /*
  * E2SM-RC RAN Function Definition of RAN function 3 (APER), from rc-codec-ran-function-definition.c: CONTROL
- * Style 3 action 1 and Style 5 action 3, each with RAN parameters 1-4. Returns the number of octets written to buf,
- * or -1. rcc_ran_function_oid() is the E2SM-RC OID announced with it.
+ * Style 5 action 3 only, with RAN parameters 1-4. Returns the number of octets written to buf, or -1.
+ * rcc_ran_function_oid() is the E2SM-RC OID announced with it.
  */
 long rcc_encode_ran_function_definition(uint8_t *buf, size_t cap);
 const char *rcc_ran_function_oid(void);
@@ -64,6 +72,9 @@ long rcc_encode_outcome_format1_empty(uint8_t *buf, size_t cap);
 long rcc_test_reencode_header(const uint8_t *hdr, size_t hdrLen, long style, long action, uint8_t *out, size_t cap);
 long rcc_test_reencode_target(const uint8_t *msg, size_t msgLen, const uint8_t *target, size_t targetLen,
                               uint8_t *out, size_t cap);
+/* Test support: the CONTROL styles of a RAN Function Definition as "<style>/<action>:<id>,<id>,...;" per action, in
+ * order (every RAN parameter ID of the action's list). Returns 0, or -1 if it does not decode cleanly. */
+int rcc_test_ran_function_definition_summary(const uint8_t *def, size_t len, char *out, size_t cap);
 
 #ifdef __cplusplus
 }

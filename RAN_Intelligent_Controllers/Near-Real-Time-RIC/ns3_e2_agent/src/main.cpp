@@ -188,8 +188,9 @@ int main() {
   SampleEncoder enc(cfg, map);
   E2Session e2(cfg, funcs, now_ms());
   IpcState ist;
+  // only a gNB announces RAN function 3 (node_ran_functions); the eNB refuses every control
   RcControlPath rc(
-      cfg.nodeId, cfg.plmnBcd, [&e2](const Bytes &pdu, const char *what) { e2.send_ctrl(pdu, what); },
+      cfg.nodeId, cfg.plmnBcd, cfg.kind == "gnb", [&e2](const Bytes &pdu, const char *what) { e2.send_ctrl(pdu, what); },
       [&ipc](const std::string &line) { return ipc.send_line(line); });
   e2.set_control_handler([&](const InboundPdu &p) {
     rc.on_request(p, stats().lastSeq, ipc.client_fd() >= 0 && ist.helloSeen);

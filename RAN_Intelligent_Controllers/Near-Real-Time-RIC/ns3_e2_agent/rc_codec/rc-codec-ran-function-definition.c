@@ -1,9 +1,10 @@
 /* E2SM-RC RAN Function Definition of the agent's RAN function 3 (see rc-codec.h). Names and IDs are those of O-RAN
- * E2SM-RC v03.00 (identical in v01.03): §7.2 (RAN Function name), §7.6.4 (CONTROL Service Style 3 "Connected Mode
- * Mobility Control", action 1 "Handover Control", RAN parameters §8.4.4.1), §7.6.6 (Style 5 "Dual Connectivity
- * Control", action 3 "DC PSCell Change control", RAN parameters §8.4.6.3). Both styles use Control Header, Message
- * and Outcome Format 1 (§7.6.4.2-5, §7.6.6.2-5); no Call Process ID format (no INSERT service). Only the
- * parameters the agent reads are listed: 1, its CHOICE Target Cell (2), NR Cell (3) and NR CGI (4). */
+ * E2SM-RC v03.00 (identical in v01.03): §7.2 (RAN Function name), §7.6.6 (CONTROL Service Style 5 "Dual Connectivity
+ * Control", action 3 "DC PSCell Change control", RAN parameters §8.4.6.3), with Control Header, Message and Outcome
+ * Format 1 (§7.6.6.2-5); no Call Process ID format (no INSERT service). It is the only control the agent executes,
+ * and the definition lists every RAN parameter the control carries: 1 Target PSCell ID, its CHOICE Target Cell (2),
+ * NR Cell (3) and NR CGI (4). */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -28,7 +29,6 @@ typedef struct {
 } control_style;
 
 static const control_style kStyles[] = {
-    {3, "Connected Mode Mobility Control", 1, "Handover Control", "Target Primary Cell ID"},
     {5, "Dual Connectivity Control", 3, "DC PSCell Change control", "Target PSCell ID"},
 };
 
@@ -87,4 +87,31 @@ RCC_API long rcc_encode_ran_function_definition(uint8_t *buf, size_t cap) {
   }
   ASN_STRUCT_FREE(asn_DEF_E2SM_RC_RANFunctionDefinition, d);
   return n;
+}
+
+RCC_API int rcc_test_ran_function_definition_summary(const uint8_t *def, size_t len, char *out, size_t cap) {
+  E2SM_RC_RANFunctionDefinition_t *d = NULL;
+  int rc = -1;
+  size_t n = 0;
+  asn_dec_rval_t r = aper_decode_complete(NULL, &asn_DEF_E2SM_RC_RANFunctionDefinition, (void **)&d, def, len);
+  if (r.code == RC_OK && r.consumed == len && cap > 0) {
+    out[0] = 0;
+    rc = 0;
+    const RANFunctionDefinition_Control_t *ctl = d->ranFunctionDefinition_Control;
+    for (int i = 0; ctl && i < ctl->ric_ControlStyle_List.list.count; i++) {
+      const RANFunctionDefinition_Control_Item_t *it = ctl->ric_ControlStyle_List.list.array[i];
+      for (int j = 0; it->ric_ControlAction_List && j < it->ric_ControlAction_List->list.count; j++) {
+        const RANFunctionDefinition_Control_Action_Item_t *a = it->ric_ControlAction_List->list.array[j];
+        n += (size_t)snprintf(out + n, n < cap ? cap - n : 0, "%ld/%ld:", it->ric_ControlStyle_Type,
+                              a->ric_ControlAction_ID);
+        for (int k = 0; a->ran_ControlActionParameters_List && k < a->ran_ControlActionParameters_List->list.count; k++)
+          n += (size_t)snprintf(out + n, n < cap ? cap - n : 0, "%s%lu", k ? "," : "",
+                                (unsigned long)a->ran_ControlActionParameters_List->list.array[k]->ranParameter_ID);
+        n += (size_t)snprintf(out + n, n < cap ? cap - n : 0, ";");
+      }
+    }
+    if (n >= cap) rc = -1;
+  }
+  ASN_STRUCT_FREE(asn_DEF_E2SM_RC_RANFunctionDefinition, d);
+  return rc;
 }

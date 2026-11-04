@@ -19,8 +19,10 @@
 #include "RANParameter-ValueType.h"
 #include "RANParameter-ValueType-Choice-ElementFalse.h"
 #include "RANParameter-ValueType-Choice-Structure.h"
+#include "ENB-ID.h"
+#include "GlobalENB-ID.h"
 #include "UEID.h"
-#include "UEID-GNB.h"
+#include "UEID-EN-GNB.h"
 
 #define RCC_API __attribute__((visibility("default")))
 
@@ -47,6 +49,34 @@ static const RANParameter_ValueType_t *child(const RANParameter_ValueType_t *vt,
   return NULL;
 }
 
+/* The en-gNB-UEID of a decoded header Format 1 (see rcc_control.enGnbUeId). */
+static void read_en_gnb_ueid(const E2SM_RC_ControlHeader_Format1_t *f1, rcc_control *out) {
+  const char *why = NULL;
+  const UEID_EN_GNB_t *ue = f1->ueID.present == UEID_PR_en_gNB_UEID ? f1->ueID.choice.en_gNB_UEID : NULL;
+  const BIT_STRING_t *macro = NULL;
+  if (!ue) {
+    why = "UE ID is not en-gNB-UEID";
+  } else if (f1->ric_ControlDecision || ue->m_eNB_UE_X2AP_ID_Extension || ue->gNB_CU_UE_F1AP_ID ||
+             ue->gNB_CU_CP_UE_E1AP_ID_List || ue->ran_UEID) {
+    why = "an optional member is present (ric-ControlDecision or an optional en-gNB-UEID member)";
+  } else if (ue->globalENB_ID.eNB_ID.present != ENB_ID_PR_macro_eNB_ID) {
+    why = "globalENB-ID eNB-ID is not a macro eNB ID";
+  } else if (ue->globalENB_ID.pLMNIdentity.size != 3 ||
+             (macro = &ue->globalENB_ID.eNB_ID.choice.macro_eNB_ID)->size != 3 || macro->bits_unused != 4) {
+    why = "globalENB-ID PLMN or macro eNB ID of the wrong size";
+  } else if (ue->m_eNB_UE_X2AP_ID < 0 || ue->m_eNB_UE_X2AP_ID > 4095) {
+    why = "m-eNB-UE-X2AP-ID outside 0..4095";
+  }
+  if (why) {
+    snprintf(out->ueIdErr, sizeof out->ueIdErr, "control header: %s", why);
+    return;
+  }
+  out->enGnbUeId = 1;
+  out->mEnbUeX2apId = (uint32_t)ue->m_eNB_UE_X2AP_ID;
+  memcpy(out->globalEnbPlmn, ue->globalENB_ID.pLMNIdentity.buf, 3);
+  out->macroEnbId = ((uint32_t)macro->buf[0] << 12) | ((uint32_t)macro->buf[1] << 4) | ((uint32_t)macro->buf[2] >> 4);
+}
+
 RCC_API int rcc_decode_control(const uint8_t *hdr, size_t hdrLen, const uint8_t *msg, size_t msgLen,
                                rcc_control *out, char *err, size_t errLen) {
   memset(out, 0, sizeof *out);
@@ -65,16 +95,7 @@ RCC_API int rcc_decode_control(const uint8_t *hdr, size_t hdrLen, const uint8_t 
   const E2SM_RC_ControlHeader_Format1_t *f1 = h->ric_controlHeader_formats.choice.controlHeader_Format1;
   out->style = f1->ric_Style_Type;
   out->action = f1->ric_ControlAction_ID;
-  if (f1->ueID.present != UEID_PR_gNB_UEID || !f1->ueID.choice.gNB_UEID) {
-    fail(err, errLen, "control header: UE ID is not gNB-UEID");
-    goto done;
-  }
-  uintmax_t amf = 0;
-  if (asn_INTEGER2umax(&f1->ueID.choice.gNB_UEID->amf_UE_NGAP_ID, &amf) != 0) {
-    fail(err, errLen, "control header: bad amf-UE-NGAP-ID");
-    goto done;
-  }
-  out->amfUeNgapId = (uint64_t)amf;
+  read_en_gnb_ueid(f1, out);
 
   if (!decode_clean(&asn_DEF_E2SM_RC_ControlMessage, (void **)&m, msg, msgLen)) {
     fail(err, errLen, "control message: APER decode failed or trailing octets");

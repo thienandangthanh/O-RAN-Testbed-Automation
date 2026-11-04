@@ -1,8 +1,8 @@
 // The agent-owned E2SetupRequest (E2AP v03.00 §9.1.2.1; criticalities per the v03.01 ASN.1) and the RAN functions
 // a node announces:
 //   gnb -> RAN function 2 (E2SM-KPM, the agent's KPM definition) and RAN function 3 (E2SM-RC, rc_codec's
-//          definition: CONTROL Style 3 action 1 and Style 5 action 3);
-//   enb -> RAN function 2 only.
+//          definition: CONTROL Style 5 action 3 only);
+//   enb -> RAN function 2 only (its agent refuses every RIC CONTROL, rc-control.hpp).
 // The Global E2 Node ID and the X2 components come from e2-node-identity.hpp. No NIST generator is used: it writes
 // the 29-bit gNB choice, an NG component and RANfunction-Item criticality reject (the ASN.1 says ignore).
 #ifndef NS3_E2_AGENT_E2_SETUP_REQUEST_HPP
