@@ -1,17 +1,22 @@
 // R1 codec probe / agent selftest. Encodes, with the agent's own encoders, the
 // E2SM-KPM pieces that no gate exercised before (RAN function description with
 // two report styles, header, format 1 with INTEGER/REAL/noValue, format 2 with
-// UE IDs) plus the agent's E2AP PDUs, and writes them as hex for decoding with
-// kpimon's own library (tools/kpimon-decode-harness) and tshark.
+// en-gNB-UEIDs) plus the agent's E2AP PDUs, and writes them as hex for decoding
+// with kpimon's own library (tools/kpimon-decode-harness) and tshark. It also
+// checks the KPM UE IDs of both node kinds built from ueContext lines
+// (codec-probe-kpm-ue-id.cpp) and the E2AP PDUs (codec-probe-e2ap.cpp); any
+// failed check makes it exit 1.
 //
 // usage: codec-probe <metric-map.json> <out-dir>
 //   <out-dir>/ind-lines.txt   "<id> <hdr_hex> <msg_hex>" per indication piece
 //   <out-dir>/ranfunc.txt     "<id> <ranfunction_description_hex>" (id ranfunc: gNB lists; ranfunc-enb: eNB lists)
 //   <out-dir>/expect.json     expected records (REAL as IEEE-754 bits) and lists
 //   <out-dir>/e2ap-<name>.hex E2AP PDUs (see codec-probe-e2ap.cpp)
+//   <out-dir>/f2-*.xer        decoded Format 2 messages with en-gNB-UEID / eNB-UEID
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -24,6 +29,7 @@ using namespace agent;
 using nlohmann::json;
 
 int probe_e2ap(const std::string &outDir, const Bytes &ranFuncDef, const Bytes &enbRanFuncDef);  // codec-probe-e2ap.cpp
+int probe_kpm_ue_ids(const std::string &outDir, const std::string &mapPath, const Bytes &hdr);  // codec-probe-kpm-ue-id.cpp
 
 namespace {
 
@@ -89,32 +95,40 @@ int main(int argc, char **argv) {
   Bytes m1;
   if (!encode_format1({f1}, map.cell, 100, m1, err)) return fail("format1", err), 1;
 
-  // (d) format 2, 3 metrics x 2 UEs, with and without UE IDs.
+  // (d) format 2, 3 metrics x 2 UEs, with and without UE IDs: en-gNB-UEIDs of
+  // master eNB 1, m-eNB-UE-X2AP-ID 2 and the upper bound 4095.
   std::vector<MetricRow> three(map.ue.begin(), map.ue.begin() + 3);
   std::vector<std::vector<MeasValue>> ues2 = {{I(2), R(0.1), N()}, {I(7), R(-0.0), R(1e300)}};
-  std::vector<uint64_t> imsi2 = {2, 1099511627775ULL};  // AMF-UE-NGAP-ID upper bound 2^40-1
-  Guami g;
-  g.plmn = {0x00, 0xF1, 0x10};
+  auto en_gnb_ue = [](uint32_t x2ap) {
+    KpmUeId u;
+    u.mEnbUeX2apId = x2ap;
+    u.macroEnbId = 1;
+    return u;
+  };
+  std::vector<KpmUeId> ids2 = {en_gnb_ue(2), en_gnb_ue(4095)};
+  const std::array<uint8_t, 3> plmn = {0x00, 0xF1, 0x10};
   Bytes m2a, m2b, m2full;
-  if (!encode_format2({ues2}, imsi2, three, g, true, 100, m2a, err)) return fail("format2 ueid", err), 1;
-  if (!encode_format2({ues2}, imsi2, three, g, false, 100, m2b, err)) return fail("format2 no ueid", err), 1;
+  if (!encode_format2({ues2}, ids2, three, plmn, true, 100, m2a, err)) return fail("format2 ueid", err), 1;
+  if (!encode_format2({ues2}, ids2, three, plmn, false, 100, m2b, err)) return fail("format2 no ueid", err), 1;
 
   // (e) format 2 over the full 58-entry UE list x 4 UEs (realistic size).
   std::vector<std::vector<MeasValue>> ues4;
-  std::vector<uint64_t> imsi4 = {1, 2, 3, 4};
+  std::vector<KpmUeId> ids4 = {en_gnb_ue(1), en_gnb_ue(2), en_gnb_ue(3), en_gnb_ue(4)};
   for (int u = 0; u < 4; u++) {
     std::vector<MeasValue> r;
     for (size_t k = 0; k < map.ue.size(); k++)
       r.push_back(map.ue[k].type == RecordType::Integer ? I(1000 * u + k) : R(u + k / 7.0 - 3.25));
     ues4.push_back(r);
   }
-  if (!encode_format2({ues4}, imsi4, map.ue, g, true, 100, m2full, err)) return fail("format2 full", err), 1;
+  if (!encode_format2({ues4}, ids4, map.ue, plmn, true, 100, m2full, err)) return fail("format2 full", err), 1;
 
-  std::ofstream lines(dir + "/ind-lines.txt");
-  lines << "f1 " << to_hex(hdr) << " " << to_hex(m1) << "\n";
-  lines << "f2ueid " << to_hex(hdr) << " " << to_hex(m2a) << "\n";
-  lines << "f2noueid " << to_hex(hdr) << " " << to_hex(m2b) << "\n";
-  lines << "f2full " << to_hex(hdr) << " " << to_hex(m2full) << "\n";
+  {
+    std::ofstream lines(dir + "/ind-lines.txt");
+    lines << "f1 " << to_hex(hdr) << " " << to_hex(m1) << "\n";
+    lines << "f2ueid " << to_hex(hdr) << " " << to_hex(m2a) << "\n";
+    lines << "f2noueid " << to_hex(hdr) << " " << to_hex(m2b) << "\n";
+    lines << "f2full " << to_hex(hdr) << " " << to_hex(m2full) << "\n";
+  }
   std::ofstream(dir + "/ranfunc.txt") << "ranfunc " << to_hex(def) << "\n" << "ranfunc-enb " << to_hex(enbDef) << "\n";
 
   auto metric_major = [](const std::vector<std::vector<MeasValue>> &u) {
@@ -137,5 +151,7 @@ int main(int argc, char **argv) {
              {"map_sha256", map.sha256}};
   std::ofstream(dir + "/expect.json") << ex.dump(1) << "\n";
   printf("%s\n", ex["sizes"].dump().c_str());
-  return probe_e2ap(dir, def, enbDef);
+  int ueIdRc = probe_kpm_ue_ids(dir, argv[1], hdr);  // appends f2engnb and f2enb to ind-lines.txt
+  int e2apRc = probe_e2ap(dir, def, enbDef);
+  return ueIdRc || e2apRc ? 1 : 0;
 }

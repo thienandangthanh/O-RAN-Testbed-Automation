@@ -104,6 +104,7 @@ void handle_line(const std::string &line, const Config &cfg, SampleEncoder &enc,
     }
     stats().helloAccepted++;
     e2.end_reports();  // a new ns-3 run: no reporting period spans two runs
+    enc.reset_ue_contexts();
     st.helloSeen = true;
     st.lockstep = m.value("pacing", "free") == "lockstep";
     st.readySent = false;
@@ -122,6 +123,14 @@ void handle_line(const std::string &line, const Config &cfg, SampleEncoder &enc,
     if (m.contains("seq") && m["seq"].is_number_integer()) stats().lastSeq = m["seq"].get<int64_t>();
     forward_sample(m, enc, e2, st);
     if (st.lockstep) send_step(cfg, ipc, stats().lastSeq);
+  } else if (type == "ueContext") {
+    std::string why;
+    if (!st.helloSeen) {
+      stats().ueContextRejected++;
+      ALOG_W("ipc: ueContext before hello ignored");
+    } else if (!enc.accept_ue_context(m, why)) {
+      ALOG_W("ipc: ueContext rejected, UE contexts cleared: %s", why.c_str());
+    }
   } else if (type == "controlAck") {
     rc.on_control_ack(m);
   } else if (type == "bye") {
@@ -222,6 +231,7 @@ int main() {
       if (ipc.client_fd() < 0) {
         ist.helloSeen = false;
         e2.end_reports();
+        enc.reset_ue_contexts();
         rc.fail_all_pending("ns-3 IPC connection closed");
       }
     }

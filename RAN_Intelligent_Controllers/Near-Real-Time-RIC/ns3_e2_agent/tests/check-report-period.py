@@ -52,7 +52,10 @@ check(h == lines[tt[0]][0], "p1000 header == seq 26's T/T header (colletStartTim
 # (b) UE: Format 2, 10 items, per (seq, UE) records == T/T
 def ue_map(msg):
     d = kpm.decode_indication_message(msg); fmt, f2 = d["format"], d["raw"]
-    ues = [u["ueID"][1]["amf-UE-NGAP-ID"] for u in f2["measCondUEidList"][0]["matchingUEidList"]]
+    # UE key: the en-gNB-UEID m-eNB-UE-X2AP-ID (the test's ueContext sets it to the IMSI);
+    # any other UEID alternative keys as None and fails the comparison below.
+    ues = [u["ueID"][1]["m-eNB-UE-X2AP-ID"] if u["ueID"][0] == "en-gNB-UEID" else None
+           for u in f2["measCondUEidList"][0]["matchingUEidList"]]
     nm = len(f2["measCondUEidList"]); out = {}
     for t, it in enumerate(f2["measData"]):
         r = recs(it)

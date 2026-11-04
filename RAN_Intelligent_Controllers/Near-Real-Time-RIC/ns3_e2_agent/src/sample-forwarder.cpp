@@ -2,6 +2,7 @@
 #include "sample-forwarder.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <map>
 
 #include "agent-log.hpp"
@@ -13,20 +14,99 @@ using nlohmann::json;
 
 namespace {
 
-constexpr uint64_t kMaxAmfUeNgapId = (1ULL << 40) - 1;  // AMF-UE-NGAP-ID ::= INTEGER (0..2^40-1)
+// An IMSI has at most 15 digits (3GPP TS 23.003). For the UE ID it is only the
+// key that maps a sample UE to its ueContext; it is never encoded as the KPM UE
+// ID (the metric map's UE-list rows may still report it as a measurement).
+constexpr int64_t kMaxImsi = 999999999999999LL;
+constexpr int64_t kMaxMmeUeS1apId = 4294967295LL;  // MME-UE-S1AP-ID ::= INTEGER (0..2^32-1)
 
 bool get_i64(const json &j, const char *key, int64_t &out) {
   auto it = j.find(key);
   if (it == j.end() || !it->is_number_integer()) return false;
+  if (it->is_number_unsigned() && it->get<uint64_t>() > (uint64_t)INT64_MAX) return false;
   out = it->get<int64_t>();
+  return true;
+}
+
+// An integer field within lo..hi; otherwise false + reason naming it.
+bool get_ranged(const json &j, const char *key, int64_t lo, int64_t hi, int64_t &out, std::string &reason) {
+  if (!get_i64(j, key, out)) {
+    reason = std::string(key) + " missing or not an integer";
+    return false;
+  }
+  if (out < lo || out > hi) {
+    reason = std::string(key) + " " + std::to_string(out) + " outside " + std::to_string(lo) + ".." +
+             std::to_string(hi);
+    return false;
+  }
+  return true;
+}
+
+// ueContext line -> imsi -> UE ID of a node of `kind` (see accept_ue_context).
+bool parse_ue_context(const json &l, const Config &cfg, std::map<uint64_t, KpmUeId> &out, std::string &reason) {
+  int64_t v = 0, node = 0, seq = 0;
+  if (!get_i64(l, "v", v) || v != 1) {
+    reason = "v is not 1";
+    return false;
+  }
+  if (!get_i64(l, "nodeId", node) || node != cfg.nodeId) {
+    reason = "nodeId does not match E2_NODE_ID=" + std::to_string(cfg.nodeId);
+    return false;
+  }
+  if (!get_ranged(l, "seq", 0, INT64_MAX, seq, reason)) return false;
+  auto it = l.find("ues");
+  if (it == l.end() || !it->is_array()) {
+    reason = "ues missing or not an array";
+    return false;
+  }
+  const bool enb = cfg.kind == "enb";
+  for (const json &u : *it) {
+    if (!u.is_object()) {
+      reason = "ues entry is not an object";
+      return false;
+    }
+    int64_t imsi = 0, rnti = 0, cell = 0, s1ap = 0;
+    std::string why;
+    if (!get_ranged(u, "imsi", 0, kMaxImsi, imsi, why) ||
+        !get_ranged(u, "lteRnti", 0, kMaxEnbUeX2apId, rnti, why) ||
+        !get_ranged(u, "mnCellId", 0, kMaxMacroEnbId, cell, why) ||
+        !get_ranged(u, "mmeUeS1apId", 0, kMaxMmeUeS1apId, s1ap, why)) {
+      reason = "UE entry " + std::to_string(out.size()) + ": " + why;
+      return false;
+    }
+    KpmUeId id;
+    id.choice = enb ? KpmUeId::Choice::Enb : KpmUeId::Choice::EnGnb;
+    id.mEnbUeX2apId = (uint32_t)rnti;
+    id.macroEnbId = (uint32_t)cell;
+    id.mmeUeS1apId = (uint32_t)s1ap;
+    if (!out.emplace((uint64_t)imsi, id).second) {
+      reason = "imsi " + std::to_string(imsi) + " repeated";
+      return false;
+    }
+  }
   return true;
 }
 
 }  // namespace
 
 SampleEncoder::SampleEncoder(const Config &cfg, const MetricMap &map)
-    : cfg_(cfg), map_(map), senderName_("ns3-cell-" + std::to_string(cfg.nodeId)) {
-  guami_.plmn = cfg.plmnBcd;
+    : cfg_(cfg), map_(map), senderName_("ns3-cell-" + std::to_string(cfg.nodeId)) {}
+
+bool SampleEncoder::accept_ue_context(const json &line, std::string &reason) {
+  std::map<uint64_t, KpmUeId> next;
+  if (!parse_ue_context(line, cfg_, next, reason)) {
+    ueContexts_.clear();
+    stats().ueContextRejected++;
+    return false;
+  }
+  ueContexts_ = std::move(next);
+  stats().ueContextRx++;
+  return true;
+}
+
+void SampleEncoder::reset_ue_contexts() {
+  ueContexts_.clear();
+  builtUeIds_.clear();
 }
 
 bool SampleEncoder::accept_hello(const json &h, HelloInfo &out, std::string &reason) const {
@@ -57,7 +137,7 @@ bool SampleEncoder::accept_hello(const json &h, HelloInfo &out, std::string &rea
   return true;
 }
 
-bool SampleEncoder::build(const json &s, SampleRecords &out, std::string &err) const {
+bool SampleEncoder::build(const json &s, SampleRecords &out, std::string &err) {
   out = SampleRecords{};
   if (!get_i64(s, "seq", out.seq) || !get_i64(s, "simTimeNs", out.simTimeNs)) {
     err = "sample without integer seq/simTimeNs";
@@ -69,8 +149,7 @@ bool SampleEncoder::build(const json &s, SampleRecords &out, std::string &err) c
   std::vector<std::pair<uint64_t, const json *>> ues;
   for (const json &u : *it) {
     auto im = u.find("imsi");
-    if (im == u.end() || !im->is_number_integer() || im->get<int64_t>() < 0 ||
-        im->get<uint64_t>() > kMaxAmfUeNgapId) {
+    if (im == u.end() || !im->is_number_integer() || im->get<int64_t>() < 0 || im->get<int64_t>() > kMaxImsi) {
       stats().uesDroppedBadImsi++;
       continue;
     }
@@ -89,6 +168,15 @@ bool SampleEncoder::build(const json &s, SampleRecords &out, std::string &err) c
     }
     out.ues.emplace_back(u.first, build_records(map_.ue, s, u.second, stats().conv));
   }
+  std::string missing;
+  for (const auto &u : out.ues)
+    if (!ueContexts_.count(u.first)) missing += (missing.empty() ? "" : ",") + std::to_string(u.first);
+  if (!missing.empty()) {
+    stats().samplesNoUeContext++;
+    err = "seq " + std::to_string(out.seq) + ": UE imsi " + missing + " without ueContext";
+    return false;
+  }
+  for (const auto &u : out.ues) builtUeIds_[u.first] = ueContexts_.at(u.first);
   return true;
 }
 
@@ -133,13 +221,22 @@ bool SampleEncoder::encode_ue_chunks(const std::vector<SampleRecords> &samples, 
     for (;;) {
       std::vector<std::vector<std::vector<MeasValue>>> periods(samples.size());
       std::vector<uint64_t> imsis(ues.begin() + i, ues.begin() + i + chunk);
+      std::vector<KpmUeId> ids;
+      for (uint64_t imsi : imsis) {
+        auto id = builtUeIds_.find(imsi);
+        if (id == builtUeIds_.end()) {
+          err = "UE imsi " + std::to_string(imsi) + " has no UE ID (its sample was not built by this encoder)";
+          return false;
+        }
+        ids.push_back(id->second);
+      }
       for (size_t t = 0; t < samples.size(); t++)
         for (uint64_t imsi : imsis) {
           auto f = bySample[t].find(imsi);
           periods[t].push_back(f == bySample[t].end() ? absent : *f->second);
         }
       Bytes msg;
-      if (!encode_format2(periods, imsis, map_.ue, guami_, true, granulMs, msg, err)) return false;
+      if (!encode_format2(periods, ids, map_.ue, cfg_.plmnBcd, true, granulMs, msg, err)) return false;
       if (msg.size() <= (size_t)cfg_.maxE2smBytes) {
         out.ueMsgs.push_back(std::move(msg));
         i += chunk;

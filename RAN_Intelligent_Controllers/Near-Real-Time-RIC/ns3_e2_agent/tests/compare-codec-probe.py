@@ -55,7 +55,11 @@ def main(argv):
         check(r.get("records") == exp[name], name + " records identical (REAL bit-exact)")
         if nue is not None:
             check(r.get("ueIdsPerItem") == nue and r.get("ueIdsUniform"), "%s %d UE IDs per measCondUEid item" % (name, nue))
-    check(ind.get("f2ueid", {}).get("amfUeNgapIds") == [2, 1099511627775], "f2ueid amf-UE-NGAP-IDs [2, 2^40-1]")
+    # The harness prints each UE ID of the first measCondUEid item as "ueIds", in the
+    # representation of the RC UE ID transform (en-gNB-UEID, macro eNB ID as 5 hex digits).
+    want = [{"type": "en-gNB-UEID", "mEnbUeX2apId": x, "globalEnbId": {"plmn": "00F110", "macroEnbId": "00001"}}
+            for x in (2, 4095)]
+    check(ind.get("f2ueid", {}).get("ueIds") == want, "f2ueid en-gNB-UEIDs: m-eNB-UE-X2AP-ID [2, 4095], globalENB-ID {00F110, 1}")
     check(ind.get("f2full", {}).get("condItems") == len(ue), "f2full one measCondUEid item per UE-list metric")
     reals = sum(1 for k in shapes for x in exp[k] if x["t"] == "real")
     print(json.dumps({"verdict": "PASS" if not fails else "FAIL", "failures": len(fails), "real_records_compared": reals,

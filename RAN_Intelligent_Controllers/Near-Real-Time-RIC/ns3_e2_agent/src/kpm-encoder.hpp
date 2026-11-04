@@ -47,22 +47,37 @@ bool encode_indication_header(const std::array<uint8_t, 8> &ts, const std::strin
 bool encode_format1(const std::vector<std::vector<MeasValue>> &periods, const std::vector<MetricRow> &rows,
                     unsigned long granulPeriodMs, Bytes &out, std::string &err);
 
-// Fixed GUAMI used in every gNB-UEID (PLMN = the node's PLMN).
-struct Guami {
-  std::array<uint8_t, 3> plmn{};
-  uint8_t amfRegionId = 1;   // BIT STRING (SIZE(8))
-  uint16_t amfSetId = 1;     // BIT STRING (SIZE(10))
-  uint8_t amfPointer = 1;    // BIT STRING (SIZE(6))
+// The UE ID of one UE in a Format 2 message: the alternative of the E2SM
+// common UEID CHOICE (NIST's KPM v3 asn1c, UEID.h) for the reporting node's type. An en-gNB reports
+// en-gNB-UEID {m-eNB-UE-X2AP-ID, globalENB-ID}; the eNB reports eNB-UEID
+// {mME-UE-S1AP-ID, gUMMEI, m-eNB-UE-X2AP-ID} with globalENB-ID absent (it is
+// reported only by an SeNB). Every other optional field is absent. The IMSI is
+// never encoded as the KPM UE ID: there is no gNB-UEID alternative here.
+struct KpmUeId {
+  enum class Choice { EnGnb, Enb };
+  Choice choice = Choice::EnGnb;
+  uint32_t mEnbUeX2apId = 0;  // ENB-UE-X2AP-ID INTEGER (0..4095): the MN's LTE RNTI
+  uint32_t macroEnbId = 0;    // en-gNB: globalENB-ID macro eNB ID (20 bits): the MN's cellId
+  uint32_t mmeUeS1apId = 0;   // eNB: MME-UE-S1AP-ID INTEGER (0..2^32-1)
 };
+
+constexpr uint32_t kMaxEnbUeX2apId = 4095;
+constexpr uint32_t kMaxMacroEnbId = (1u << 20) - 1;
+// Fixed GUMMEI MME group ID (OCTET STRING SIZE(2)) and MME code (SIZE(1)) of
+// every eNB-UEID; its PLMN is the node's PLMN.
+constexpr uint16_t kGummeiMmeGroupId = 1;
+constexpr uint8_t kGummeiMmeCode = 1;
 
 // IndicationMessage format 2: one measData item per granularity period, oldest
 // first, each metric-major: item t has records[m * nUe + u] = periods[t][u][m].
 // measCondUEidList has one item per UE-list metric (measID, noLabel and, when
-// withUeIds, one gNB-UEID per UE with amf-UE-NGAP-ID = imsi); the UE list is
-// the same for every period.
+// withUeIds, one UEID per UE, ueIds[u], with PLMN `plmn` in its globalENB-ID or
+// GUMMEI); the UE list is the same for every period. An m-eNB-UE-X2AP-ID above
+// 4095 or a macro eNB ID above 20 bits is refused (false + err).
 bool encode_format2(const std::vector<std::vector<std::vector<MeasValue>>> &periods,
-                    const std::vector<uint64_t> &imsis, const std::vector<MetricRow> &rows, const Guami &guami,
-                    bool withUeIds, unsigned long granulPeriodMs, Bytes &out, std::string &err);
+                    const std::vector<KpmUeId> &ueIds, const std::vector<MetricRow> &rows,
+                    const std::array<uint8_t, 3> &plmn, bool withUeIds, unsigned long granulPeriodMs, Bytes &out,
+                    std::string &err);
 
 }  // namespace agent
 

@@ -17,7 +17,9 @@ extern "C" {
 #include "MeasurementInfoList.h"
 #include "MeasurementLabel.h"
 #include "MeasurementRecordItem.h"
-#include "UEID-GNB.h"
+#include "E2SM-COMMON-IEs_GlobalENB-ID.h"
+#include "UEID-EN-GNB.h"
+#include "UEID-ENB.h"
 #include "UEID.h"
 }
 
@@ -61,17 +63,42 @@ void set_bits(BIT_STRING_t *b, uint32_t value, int bits) {
   for (int i = 0; i < bytes; i++) b->buf[i] = (uint8_t)(v >> (8 * (bytes - 1 - i)));
 }
 
-MatchingUEidItem_t *ue_id(uint64_t imsi, const Guami &g) {
+// Refuses UE IDs whose values do not fit their ASN.1 types.
+bool check_ue_id(const KpmUeId &u, std::string &err) {
+  if (u.mEnbUeX2apId > kMaxEnbUeX2apId) {
+    err = "format2: m-eNB-UE-X2AP-ID " + std::to_string(u.mEnbUeX2apId) + " outside 0..4095";
+    return false;
+  }
+  if (u.choice == KpmUeId::Choice::EnGnb && u.macroEnbId > kMaxMacroEnbId) {
+    err = "format2: macro eNB ID " + std::to_string(u.macroEnbId) + " wider than 20 bits";
+    return false;
+  }
+  return true;
+}
+
+MatchingUEidItem_t *ue_id(const KpmUeId &u, const std::array<uint8_t, 3> &plmn) {
   auto *it = (MatchingUEidItem_t *)calloc(1, sizeof(MatchingUEidItem_t));
-  auto *gnb = (UEID_GNB_t *)calloc(1, sizeof(UEID_GNB_t));
-  it->ueID.present = UEID_PR_gNB_UEID;
-  it->ueID.choice.gNB_UEID = gnb;
-  asn_uint642INTEGER(&gnb->amf_UE_NGAP_ID, imsi);
-  OCTET_STRING_fromBuf(&gnb->guami.pLMNIdentity, (const char *)g.plmn.data(), 3);
-  set_bits(&gnb->guami.aMFRegionID, g.amfRegionId, 8);
-  set_bits(&gnb->guami.aMFSetID, g.amfSetId, 10);
-  set_bits(&gnb->guami.aMFPointer, g.amfPointer, 6);
-  // globalNG-RANNode-ID is a v3 extension addition: never set.
+  if (u.choice == KpmUeId::Choice::EnGnb) {
+    auto *en = (UEID_EN_GNB_t *)calloc(1, sizeof(UEID_EN_GNB_t));
+    it->ueID.present = UEID_PR_en_gNB_UEID;
+    it->ueID.choice.en_gNB_UEID = en;
+    en->m_eNB_UE_X2AP_ID = (ENB_UE_X2AP_ID_t)u.mEnbUeX2apId;
+    OCTET_STRING_fromBuf(&en->globalENB_ID.pLMNIdentity, (const char *)plmn.data(), 3);
+    en->globalENB_ID.eNB_ID.present = E2SM_COMMON_IEs_ENB_ID_PR_macro_eNB_ID;
+    set_bits(&en->globalENB_ID.eNB_ID.choice.macro_eNB_ID, u.macroEnbId, 20);
+  } else {
+    auto *enb = (UEID_ENB_t *)calloc(1, sizeof(UEID_ENB_t));
+    it->ueID.present = UEID_PR_eNB_UEID;
+    it->ueID.choice.eNB_UEID = enb;
+    enb->mME_UE_S1AP_ID = (MME_UE_S1AP_ID_t)u.mmeUeS1apId;
+    const uint8_t group[2] = {(uint8_t)(kGummeiMmeGroupId >> 8), (uint8_t)kGummeiMmeGroupId};
+    OCTET_STRING_fromBuf(&enb->gUMMEI.pLMN_Identity, (const char *)plmn.data(), 3);
+    OCTET_STRING_fromBuf(&enb->gUMMEI.mME_Group_ID, (const char *)group, 2);
+    OCTET_STRING_fromBuf(&enb->gUMMEI.mME_Code, (const char *)&kGummeiMmeCode, 1);
+    enb->m_eNB_UE_X2AP_ID = (ENB_UE_X2AP_ID_t *)calloc(1, sizeof(ENB_UE_X2AP_ID_t));
+    *enb->m_eNB_UE_X2AP_ID = (ENB_UE_X2AP_ID_t)u.mEnbUeX2apId;
+    // globalENB-ID stays absent: it is reported only by an SeNB.
+  }
   return it;
 }
 
@@ -128,14 +155,18 @@ bool encode_format1(const std::vector<std::vector<MeasValue>> &periods, const st
 }
 
 bool encode_format2(const std::vector<std::vector<std::vector<MeasValue>>> &periods,
-                    const std::vector<uint64_t> &imsis, const std::vector<MetricRow> &rows, const Guami &guami,
-                    bool withUeIds, unsigned long granulPeriodMs, Bytes &out, std::string &err) {
-  if (periods.empty() || imsis.empty() || rows.empty()) {
+                    const std::vector<KpmUeId> &ueIds, const std::vector<MetricRow> &rows,
+                    const std::array<uint8_t, 3> &plmn, bool withUeIds, unsigned long granulPeriodMs, Bytes &out,
+                    std::string &err) {
+  if (periods.empty() || ueIds.empty() || rows.empty()) {
     err = "format2: needs at least one period, one UE and one metric";
     return false;
   }
+  if (withUeIds)
+    for (const KpmUeId &u : ueIds)
+      if (!check_ue_id(u, err)) return false;
   for (const auto &perUe : periods) {
-    if (perUe.size() != imsis.size()) {
+    if (perUe.size() != ueIds.size()) {
       err = "format2: UE count differs between periods";
       return false;
     }
@@ -168,7 +199,7 @@ bool encode_format2(const std::vector<std::vector<std::vector<MeasValue>>> &peri
     ASN_SEQUENCE_ADD(&c->matchingCond.list, mc);
     if (withUeIds) {
       c->matchingUEidList = (MatchingUEidList *)calloc(1, sizeof(MatchingUEidList_t));
-      for (uint64_t imsi : imsis) ASN_SEQUENCE_ADD(&c->matchingUEidList->list, ue_id(imsi, guami));
+      for (const KpmUeId &u : ueIds) ASN_SEQUENCE_ADD(&c->matchingUEidList->list, ue_id(u, plmn));
     }
     // matchingUEidPerGP is a v3 extension addition: never set.
     ASN_SEQUENCE_ADD(&f2->measCondUEidList.list, c);

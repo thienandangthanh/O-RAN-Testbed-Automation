@@ -34,6 +34,7 @@ void print_stats_line(const Stats &s, const char *event, const std::string &reas
   j["samplesUnreported"] = s.samplesUnreported;
   j["samplesGapDiscarded"] = s.samplesGapDiscarded;
   j["samplesReportFailed"] = s.samplesReportFailed;
+  j["samplesNoUeContext"] = s.samplesNoUeContext;
   j["dropped"] = {{"e2Down", s.droppedE2Down}, {"noSub", s.droppedNoSub}, {"sendBusy", s.droppedSendBusy},
                   {"encode", s.droppedEncode}, {"beforeHello", s.samplesBeforeHello}, {"badNode", s.samplesBadNode},
                   {"reportGaps", s.reportGaps}};
@@ -48,7 +49,8 @@ void print_stats_line(const Stats &s, const char *event, const std::string &reas
   j["indTxUe"] = s.indTxUe;
   j["ipc"] = {{"accepted", s.ipcAccepted}, {"rejectedSecond", s.ipcRejectedSecond},
               {"lineTooLong", s.ipcLineTooLong}, {"badJson", s.ipcBadJson}, {"helloAccepted", s.helloAccepted},
-              {"helloRejected", s.helloRejected}, {"bye", s.byeRx}, {"unknownType", s.unknownType}};
+              {"helloRejected", s.helloRejected}, {"bye", s.byeRx}, {"unknownType", s.unknownType},
+              {"ueContext", s.ueContextRx}, {"ueContextRejected", s.ueContextRejected}};
   j["e2"] = {{"connectAttempts", s.connectAttempts}, {"connectFailures", s.connectFailures}, {"setups", s.setups},
              {"rxPdu", s.rxPdu}, {"rxPduUndecodable", s.rxPduUndecodable}, {"subsAdded", s.subsAdded},
              {"subsReplaced", s.subsReplaced}, {"subsDeleted", s.subsDeleted}, {"subsOtherFunc", s.subsOtherFunc},

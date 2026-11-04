@@ -2,14 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ns3-e2-ipc.v1",
   "title": "ns-3 to E2 agent IPC, version 1",
-  "description": "Newline-delimited JSON over TCP, one object per line, UTF-8, at most 1 MiB per line, ns-3 -> agent only in v1. ns-3 writes the identical line to its local trace before sending, so the trace is the wire. Non-finite doubles are encoded as null. Doubles use shortest round-trip decimal so values compare bit-exactly. Receivers ignore unknown keys; a new key bumps 'minor', a breaking change bumps 'v'. Minor 1 adds 'control' (agent -> ns-3, an RC handover control the agent decoded) and 'controlAck' (ns-3 -> agent, its outcome). Minor 2 adds lock-step pacing: hello 'pacing' ('free', the default, or 'lockstep'), 'tStartS' and 'tGateS'; 'step' (agent -> ns-3) once the agent has handled sample k, seq -1 meaning ready. In lock-step a control is applied at the barrier after sample afterSeq; one that reaches a later barrier is answered refused/late. Wall-clock values appear only inside 'diag'.",
+  "description": "Newline-delimited JSON over TCP, one object per line, UTF-8, at most 1 MiB per line, ns-3 -> agent only in v1. ns-3 writes the identical line to its local trace before sending, so the trace is the wire. Non-finite doubles are encoded as null. Doubles use shortest round-trip decimal so values compare bit-exactly. Receivers ignore unknown keys; a new key bumps 'minor', a breaking change bumps 'v'. Minor 1 adds 'control' (agent -> ns-3, an RC handover control the agent decoded) and 'controlAck' (ns-3 -> agent, its outcome). Minor 2 adds lock-step pacing: hello 'pacing' ('free', the default, or 'lockstep'), 'tStartS' and 'tGateS'; 'step' (agent -> ns-3) once the agent has handled sample k, seq -1 meaning ready. In lock-step a control is applied at the barrier after sample afterSeq; one that reaches a later barrier is answered refused/late. Minor 3 adds 'ueContext' (ns-3 -> agent), which carries the node's UE contexts for the KPM UE IDs; it is sent on the same connection before the sample of a seq whenever the node's UE context set changed, and each line replaces the node's whole set; ns-3 writes it to e2-ue-context-<node>.jsonl, never to the ipc trace. Wall-clock values appear only inside 'diag'.",
   "oneOf": [
     { "$ref": "#/$defs/hello" },
     { "$ref": "#/$defs/sample" },
     { "$ref": "#/$defs/bye" },
     { "$ref": "#/$defs/control" },
     { "$ref": "#/$defs/controlAck" },
-    { "$ref": "#/$defs/step" }
+    { "$ref": "#/$defs/step" },
+    { "$ref": "#/$defs/ueContext" }
   ],
   "$defs": {
     "nodeId": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "ns-3 cellId of the E2 node (LTE eNB = 1, mmWave gNBs = 2..1+N in scenario-zero)." },
@@ -164,7 +165,33 @@
         "controls": { "type": "integer" }
       },
       "additionalProperties": true
+    },
+    "ueContext": {
+      "type": "object",
+      "description": "Minor 3. ns-3 -> agent: every UE of the node (a gNB: the UEs in its UE map; the eNB: all of its UEs) with the IDs the agent reports in KPM Format 2 (gNB: en-gNB-UEID {m-eNB-UE-X2AP-ID = lteRnti, globalENB-ID macro eNB ID = mnCellId}; eNB: eNB-UEID {mME-UE-S1AP-ID = mmeUeS1apId, gUMMEI, m-eNB-UE-X2AP-ID = lteRnti}). For the UE ID the IMSI only maps sample UEs to these IDs: it is never encoded as the KPM UE ID (the UEID CHOICE carries en-gNB-UEID or eNB-UEID only). The agent refuses a line with a value outside its range (and clears the node's set), and does not encode a sample whose UE has no context.",
+      "required": ["type", "v", "nodeId", "seq", "ues"],
+      "properties": {
+        "type": { "const": "ueContext" },
+        "v": { "const": 1 },
+        "nodeId": { "$ref": "#/$defs/nodeId" },
+        "seq": { "type": "integer", "minimum": 0, "description": "Seq of the sample this line precedes." },
+        "ues": {
+          "type": "array",
+          "description": "Sorted by imsi, each imsi at most once.",
+          "items": {
+            "type": "object",
+            "required": ["imsi", "lteRnti", "mnCellId", "mmeUeS1apId"],
+            "properties": {
+              "imsi": { "type": "integer", "minimum": 0, "maximum": 999999999999999 },
+              "lteRnti": { "type": "integer", "minimum": 0, "maximum": 4095, "description": "The UE's RNTI at the master LTE eNB (the X2AP UE ID); ENB-UE-X2AP-ID is INTEGER (0..4095)." },
+              "mnCellId": { "type": "integer", "minimum": 0, "maximum": 1048575, "description": "cellId of the master LTE eNB: its 20-bit macro eNB ID." },
+              "mmeUeS1apId": { "type": "integer", "minimum": 0, "maximum": 4294967295, "description": "The UE's MME UE S1AP ID (ns-3 sets it to the IMSI)." }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
     }
-
   }
 }

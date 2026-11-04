@@ -1,7 +1,8 @@
 // KPM reporting period / granularity test. Checks, with the agent's own code:
 //   tt-*        at P = T (one sample per report) the header and message octets
-//               are byte-identical to the committed output of the encoder before
-//               reporting periods existed (fixtures/kpm-tt-golden-*.txt);
+//               are byte-identical to the committed golden (fixtures/kpm-tt-golden-*.txt):
+//               header and cell pieces from the encoder before reporting periods
+//               existed, UE pieces from the en-gNB-UEID encoder;
 //   p1000-*     P = 1000 ms, G = T = 100 ms (kpimon's own action definition):
 //               admitted; one report of 10 samples whose measData item t equals,
 //               octet for octet, the T/T message of sample t (absent UE: noValue);
@@ -19,12 +20,16 @@
 //               report, a seq gap restarts the period, a period cut by bye is not
 //               reported, and samplesIn == forwarded + gapDiscarded + failed +
 //               unreported;
-// and writes the octets for decoding with kpimon's library
+// Before each fixture sample the test feeds the ueContext ns-3 would send: every
+// UE of the sample with lteRnti = imsi (synthetic, so the decoded
+// m-eNB-UE-X2AP-ID names the IMSI), mnCellId 1 and mmeUeS1apId = imsi.
+// It also writes the octets for decoding with kpimon's library
 // (tools/kpimon-decode-harness, ind-lines.txt) and with the independent pycrate
 // codec (tools/asn1-indep, tests/check-report-period.py).
 //
 // usage: kpm-report-period-test <metric-map.json> <fixtures-dir> <out-dir>
 // Prints one PASS/FAIL line per check and "kpm-report-period-test: ok" or exit 1.
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -60,7 +65,8 @@ extern "C" {
 #include "MeasurementRecordItem.h"
 #include "ProtocolIE-Field.h"
 #include "SuccessfulOutcome.h"
-#include "UEID-GNB.h"
+#include "UEID-EN-GNB.h"
+#include "UEID.h"
 #include "UnsuccessfulOutcome.h"
 }
 
@@ -301,13 +307,14 @@ Bytes enc_item(const MeasurementDataItem_t *it) {
   return b;
 }
 
-uint64_t amf_ue_ngap_id(const MatchingUEidItem_t *m) {
-  uintmax_t v = 0;
-  if (m->ueID.present == UEID_PR_gNB_UEID) asn_INTEGER2umax(&m->ueID.choice.gNB_UEID->amf_UE_NGAP_ID, &v);
-  return v;
+// The m-eNB-UE-X2AP-ID of an en-gNB-UEID (= the IMSI with this test's contexts);
+// any other UEID alternative gives UINT64_MAX, which matches no UE.
+uint64_t x2ap_ue_id(const MatchingUEidItem_t *m) {
+  if (m->ueID.present != UEID_PR_en_gNB_UEID) return UINT64_MAX;
+  return (uint64_t)m->ueID.choice.en_gNB_UEID->m_eNB_UE_X2AP_ID;
 }
 
-// Format 2 message -> {(item, imsi) -> per-metric record octets}.
+// Format 2 message -> {(item, X2AP UE ID) -> per-metric record octets}.
 using UeRecords = std::map<std::pair<int, uint64_t>, std::vector<Bytes>>;
 bool ue_records(const Bytes &msg, UeRecords &out, int &items, unsigned long &granul) {
   E2SM_KPM_IndicationMessage_t *m = decode_msg(msg);
@@ -319,7 +326,7 @@ bool ue_records(const Bytes &msg, UeRecords &out, int &items, unsigned long &gra
   auto *f2 = m->indicationMessage_formats.choice.indicationMessage_Format2;
   std::vector<uint64_t> imsis;
   auto *ul = f2->measCondUEidList.list.array[0]->matchingUEidList;
-  for (int u = 0; u < ul->list.count; u++) imsis.push_back(amf_ue_ngap_id(ul->list.array[u]));
+  for (int u = 0; u < ul->list.count; u++) imsis.push_back(x2ap_ue_id(ul->list.array[u]));
   size_t nUe = imsis.size(), nMet = (size_t)f2->measCondUEidList.list.count;
   items = f2->measData.list.count;
   granul = f2->granulPeriod ? *f2->granulPeriod : 0;
@@ -331,6 +338,14 @@ bool ue_records(const Bytes &msg, UeRecords &out, int &items, unsigned long &gra
   }
   ASN_STRUCT_FREE(asn_DEF_E2SM_KPM_IndicationMessage, m);
   return true;
+}
+
+// The ueContext line for a sample: each of its UEs with lteRnti = imsi.
+json ue_context_for(const json &sample) {
+  json ues = json::array();
+  for (const json &u : sample.value("ues", json::array()))
+    ues.push_back({{"imsi", u["imsi"]}, {"lteRnti", u["imsi"]}, {"mnCellId", 1}, {"mmeUeS1apId", u["imsi"]}});
+  return {{"type", "ueContext"}, {"v", 1}, {"nodeId", sample["nodeId"]}, {"seq", sample["seq"]}, {"ues", ues}};
 }
 
 // ---- the sample fixture ----
@@ -350,6 +365,7 @@ bool load_samples(const std::string &path, SampleEncoder &enc, Fixture &f) {
       if (!enc.accept_hello(j, f.hello, err)) return false;
       continue;
     }
+    if (!enc.accept_ue_context(ue_context_for(j), err)) return false;
     SampleRecords r;
     if (!enc.build(j, r, err)) return false;
     f.samples.push_back(r);
@@ -473,10 +489,13 @@ int main(int argc, char **argv) {
 
   // A repeated IMSI in one sample: the first entry is kept, the other counted.
   {
-    json dup = json::parse(R"({"type":"sample","seq":1,"simTimeNs":100000000,"ues":[{"imsi":7},{"imsi":7},{"imsi":8}]})");
+    json dup = json::parse(R"({"type":"sample","nodeId":2,"seq":1,"simTimeNs":100000000,"ues":[{"imsi":7},{"imsi":7},{"imsi":8}]})");
+    json ctx = json::parse(R"({"type":"ueContext","v":1,"nodeId":2,"seq":1,"ues":[)"
+                           R"({"imsi":7,"lteRnti":7,"mnCellId":1,"mmeUeS1apId":7},)"
+                           R"({"imsi":8,"lteRnti":8,"mnCellId":1,"mmeUeS1apId":8}]})");
     const uint64_t before = stats().uesDroppedDuplicateImsi;
     SampleRecords r;
-    bool ok = enc.build(dup, r, err);
+    bool ok = enc.accept_ue_context(ctx, err) && enc.build(dup, r, err);
     check(ok && r.ues.size() == 2 && r.ues[0].first == 7 && stats().uesDroppedDuplicateImsi == before + 1,
           "duplicate IMSI: kept once, uesDropped.duplicateImsi + 1");
   }
@@ -487,6 +506,12 @@ int main(int argc, char **argv) {
     json hello = {{"schema", "ns3-e2-ipc"}, {"v", 1}, {"nodeId", 2}, {"kind", "gnb"}, {"periodNs", 100000000},
                   {"simStartEpochMs", 0}};
     check(enc.accept_hello(hello, h, err), "hello periodNs 100 ms == E2_INDICATION_PERIOD_MS accepted");
+    // The agent does not judge `minor`: minor 3 (ueContext) is accepted, and so
+    // is an older minor, whose samples then fail loudly for want of a ueContext.
+    hello["minor"] = 3;
+    check(enc.accept_hello(hello, h, err), "hello minor 3 accepted");
+    hello["minor"] = 2;
+    check(enc.accept_hello(hello, h, err), "hello minor 2 accepted");
     hello["periodNs"] = 200000000;
     check(!enc.accept_hello(hello, h, err), "hello periodNs 200 ms != E2_INDICATION_PERIOD_MS rejected: " + err);
   }
@@ -520,7 +545,7 @@ int main(int argc, char **argv) {
   }
   check(pieces == golden.size() && same == golden.size(),
         "tt-byte-identical: " + std::to_string(same) + "/" + std::to_string(golden.size()) +
-            " header/cell/UE octet strings equal the pre-change encoder's");
+            " header/cell/UE octet strings equal the golden's");
 
   auto kp = read_keyed(fx + "/kpimon-subscription-octets.txt");
   Bytes trig100 = from_hex(kp["kpimon-trigger-100"]), trig1000 = from_hex(kp["kpimon-trigger-1000"]),

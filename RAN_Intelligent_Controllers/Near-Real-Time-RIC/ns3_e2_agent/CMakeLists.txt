@@ -73,7 +73,7 @@ add_executable(ns3-e2-agent
   src/e2-session.cpp)
 target_link_libraries(ns3-e2-agent ns3_e2_agent_core)
 
-add_executable(codec-probe tests/codec-probe.cpp tests/codec-probe-e2ap.cpp)
+add_executable(codec-probe tests/codec-probe.cpp tests/codec-probe-e2ap.cpp tests/codec-probe-kpm-ue-id.cpp)
 target_link_libraries(codec-probe ns3_e2_agent_core)
 
 add_executable(rc-control-test tests/rc-control-test.cpp)
