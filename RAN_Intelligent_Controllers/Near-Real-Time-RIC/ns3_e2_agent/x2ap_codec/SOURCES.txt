@@ -22,4 +22,5 @@ asn1c
 x2ap-codec.c, x2ap-codec.h
   The agent's wrapper (x2c_*). Built with -fvisibility=hidden, so only x2c_* leave the library.
   Cross-checked against the independent codec (tools/asn1-indep, pycrate 0.8.1): the ENDCX2SetupRequest of the
-  probe's en-gNB 0x7F000001 and eNB 0xFFFFE and the MeasurementTimingConfiguration for NR-ARFCN 633333 are byte-equal.
+  probe's en-gNB 0x7F000001 (NRARFCN 632758, Point A; nR-TxBW scs60/nrb24) and eNB 0xFFFFE and the
+  MeasurementTimingConfiguration for the SSB at NR-ARFCN 633312 (GSCN 7846) are byte-equal.

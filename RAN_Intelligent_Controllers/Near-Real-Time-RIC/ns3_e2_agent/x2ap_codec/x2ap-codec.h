@@ -24,7 +24,7 @@ typedef struct {
   uint16_t pci;                 /* NR-PCI 0..1007 */
   uint64_t nr_cell_identity;    /* 36-bit NR Cell Identity (gNB ID in the leftmost bits) */
   uint16_t configured_tac;      /* Configured TAC, 2 octets; no 5GS-TAC is sent (an EN-DC cell without 5GS service) */
-  long nr_arfcn;                /* NR-ARFCN of the TDD carrier */
+  long nr_arfcn;                /* NRARFCN: the NR-ARFCN of Point A, CRB 0 of the carrier (36.423 §9.2.106) */
   long band;                    /* NR operating band (freqBandIndicatorNr) */
   long nr_scs;                  /* NRSCS enumeration index: 0 scs15, 1 scs30, 2 scs60, 3 scs120 */
   long nr_nrb;                  /* NRNRB enumeration index (e.g. 7 = nrb51) */

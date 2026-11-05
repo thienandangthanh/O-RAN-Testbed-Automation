@@ -56,7 +56,7 @@ x2c_nr_cell nr_cell(uint32_t gnbId, uint32_t cellId, const uint8_t *mtc, size_t 
   c.pci = (uint16_t)cellId;
   c.nr_cell_identity = ((uint64_t)gnbId << 4) | kNrCellPart;
   c.configured_tac = kConfiguredTac;
-  c.nr_arfcn = kNrArfcn;
+  c.nr_arfcn = kNrPointA;
   c.band = kNrBand;
   c.nr_scs = kNrScsIndex;
   c.nr_nrb = kNrNrbIndex;
@@ -95,7 +95,7 @@ bool build_x2_components(const Config &cfg, std::vector<X2Component> &out, std::
   uint8_t mtc[8];
   size_t mtcLen = 0;
   char e[256] = {0};
-  if (x2c_measurement_timing_configuration(kNrArfcn, kSsbScsIndex, kSmtcPeriodSf, kSmtcOffsetSf, kSmtcDurationSf,
+  if (x2c_measurement_timing_configuration(kNrSsbArfcn, kSsbScsIndex, kSmtcPeriodSf, kSmtcOffsetSf, kSmtcDurationSf,
                                            mtc, &mtcLen, e, sizeof e) != 0) {
     err = std::string("X2 component: ") + e;
     return false;
