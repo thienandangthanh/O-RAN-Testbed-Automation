@@ -1,0 +1,307 @@
+{
+  "schema": "ns3-e2-kpm-measurement-clauses",
+  "v": 1,
+  "doc": [
+    "The 3GPP clauses that tests/lint-metric-map.py judges every non-ns3.* name of schema/metric-map.v1.json against.",
+    "A gNB row (an en-gNB cell or UE) is judged against 3GPP TS 28.552 V20.2.0 only; an eNB row against 3GPP TS 32.425 V19.0.0 only. Pinned by exact version, no compatibility mode.",
+    "Every page is a PDF page of the Zotero attachment named in documents. Every field of an entry comes from a page that was read; nothing here is inferred from another version.",
+    "An entry exists for every 3GPP name the shipped map keeps (today only the two en-gNB rows that carry pendingFix), for every 3GPP name a renamed row used to carry where the judging document defines that measurement, and for the names the lint self-test needs to prove a failure (an entry is not a pass: a row passes only through a value check that holds).",
+    "Entry fields: name (the base name; suffixes are parsed with nameForms), document, version, clause, title, pages, objectClass, rat, layer, unit (KPM v03.00 7.9.1 where it lists the name, else the clause's; 'count' where the clause states no unit), dataType (the clause's item d), or 7.9.1's replacement), owningNode (the node kinds whose function owns the counted event), countingEvent (item c), quoted or condensed), splitOnly, dcExcluded, perUeAllowed (KPM v03.00 7.9 pp.13-14 lists the measurement type for per-UE conversion), nameForms (total: the bare name with noLabel is the clause's total; templates: the suffix slot kinds of item e)), v17Identical (28.552 entries: the clause text of TS 28.552 V17.17.0 is identical after whitespace normalisation; null for 32.425 entries), v17, legacyName (map: the map's name before this registry; v17: the V17.17.0 name when it differs), valueChecks (per map row source and xform: holds, the ns-3 / oran-interface source file:line at the pinned commits, the reason, the residuals, and for an INTEGER entry the bound that keeps the value inside kpimon's int32).",
+    "A value check holds only when ns-3 counts the clause's events exactly once on every path the runs reach; only the counting instant may differ, by at most 1 slot for a count or 1 of the clause's own sampling steps for a sampled value (the E2 report period is never a sampling step). An event counted once but, through that shift, in the adjacent period is a residual. This allowance is the project's tolerance, not a 3GPP number.",
+    "'gaps' lists the paths the runs reach that drop or add counted events; an entry that lists any gap cannot hold, and every value check that holds carries an explicit empty 'gaps'. 'residuals' lists only counting-instant shifts within the allowance; 'interpretations' lists points the clause leaves open, each with its basis; 'reAudit' names a run-configuration change after which the check must be judged again.",
+    "Source pins: ns-3-mmwave-oran 74c165f1, oran-interface 53253fe (the superproject's submodule pins when the sources were last checked)."
+  ],
+  "documents": {
+    "28.552": {"title": "3GPP TS 28.552 Management and orchestration; 5G performance measurements", "version": "V20.2.0", "zotero": "5SZUBP6M", "attachment": "RMU9VRW7", "rat": "NR", "kinds": ["gnb"]},
+    "32.425": {"title": "3GPP TS 32.425 Performance Management (PM); Performance measurements Evolved Universal Terrestrial Radio Access Network (E-UTRAN)", "version": "V19.0.0", "zotero": "9XR9PVRW", "attachment": "3IK5R7U8", "rat": "E-UTRA", "kinds": ["enb"], "pageNote": "ETSI TS 132 425 V19.0.0: PDF page = printed page + 1"},
+    "28.552-v17": {"title": "3GPP TS 28.552 (ETSI TS 128 552)", "version": "V17.17.0", "zotero": "XU985K2J", "attachment": "WJPE6SBD", "pageNote": "ETSI TS 128 552 V17.17.0: PDF page = printed page + 1; used for v17Identical only"},
+    "kpm": {"title": "O-RAN.WG3.E2SM-KPM-R003", "version": "v03.00", "zotero": "F82PYZVK", "attachment": "TH66CKUZ"}
+  },
+  "interpretations": {
+    "filter": "A clause name of the form X_Filter is matched by the bare name X sent with noLabel, read as the unfiltered total over every filter value. Basis: KPM v03.00 8.3.9 p.30 requires a PrintableString name, which has no '_'; 28.552 V20.2.0 4.1 p.33 lets a consumer identify a measurement without any subcounter or filter where the definition allows it, and 4.3 p.35 gives '<familyName>.<measurementName>' as the form for a result without subcounter or filter. This reading is the project's interpretation, not a 3GPP statement.",
+    "noLabel": "noLabel is 'the associated measurement type without any subcounter' (KPM v03.00 8.3.11 p.30). A bare name with noLabel is used only where nameForms.total is true and the value check holds for the total.",
+    "kpmUnitMatch": "KPM v03.00 7.9.1 p.14 cites some 28.552 clauses by older numbers (DRB.PdcpSduVolumeDL_Filter as 5.1.2.1.2.1, which V20.2.0 numbers 5.1.2.1.1.1). Its unit replacement is matched to an entry by measurement name, not by clause number.",
+    "kbitRounding": "A Kbit INTEGER value (KPM v03.00 7.9.1 p.14) is the bit count converted to whole Kbit. Neither the clause nor 7.9.1 states how to round, so the rounding is a point the clause leaves open; the conversion shifts no counted bit into another period.",
+    "documentScope": "The split-only and DC-excluded rule applies to the entries of the row's own document; an entry of another document applies only when the row's document has no entry of the name.",
+    "vendorNames": "An ns3.* name token is compared without case against the 3GPP family names and placeholders, and a token that starts with a family followed by an upper-case letter or a digit also reuses it. This is stricter than a plain token match.",
+    "suffixes": "28.552 V20.2.0 4.1a p.33-34 appends a subcounter with '.'. A suffix whose slot kind has a KPM v03.00 8.3.11 label (pp.30-31) belongs in a Measurement Label (8.3.9 p.30), so it fails; a slot kind with no KPM label (modulation, resource type) stays in the name as the clause lists it."
+  },
+  "families": {
+    "names": ["DRB", "RRC", "UECNTX", "RRU", "RM", "SM", "GTP", "IP", "PA", "MM", "VR", "CARR", "QF", "AT", "SMS", "PEE", "NFS", "PFD", "RACH", "MR", "L1M", "NSS", "PAG", "NIDD", "EPP", "TI", "CE", "SPP", "BDTP", "DM", "AFQ", "UCM", "PAU", "EEX", "SDM", "PPV", "DIS", "SP", "DANS", "OEU", "UESA", "AE", "ERAB", "HO", "S1SIG", "SRB", "EQPT", "TB", "LWI", "ENDC", "QosFlow"],
+    "sources": ["28.552 V20.2.0 3.3 pp.32-33 (the list; 'Location Management' is a multi-word family and cannot be a name token)", "32.425 V19.0.0 3.1 PDF pp.13-14 (adds ERAB, HO, S1SIG, SRB, EQPT, TB, LWI, ENDC)", "28.552 V20.2.0 5.1.1.7 p.111 (TB) and 5.1.3.6.1.1 p.196 (QosFlow): prefixes 28.552 uses without listing them"]
+  },
+  "placeholders": {
+    "names": ["QOS", "QoS", "Qos", "QCI", "5QI", "QFI", "SNSSAI", "PLMN", "Filter", "UEType", "ResType", "Cause", "BWP", "UEID"],
+    "sources": ["28.552 V20.2.0 4.2.2 pp.34-35 (QOS, SNSSAI, PLMN filters)", "28.552 V20.2.0 5.1.1.10.2 p.115 (.5QI)", "28.552 V20.2.0 5.1.1.2.1 p.44 (ResType, UEType)", "28.552 V20.2.0 5.1.1.3.1 p.57 (BWP)", "KPM v03.00 7.9.1 p.14 (.QoS)", "KPM v03.00 8.3.11 p.30 (QCI, QFI)", "the ns-O-RAN spellings .Qos and .UEID that the map's names inherited"]
+  },
+  "slotKinds": {
+    "plmn": {"label": "PLMN ID", "pattern": "^.+$"},
+    "snssai": {"label": "Slice ID", "pattern": "^.+$"},
+    "fiveQi": {"label": "5QI", "pattern": "^.+$"},
+    "qfi": {"label": "QFI", "pattern": "^.+$"},
+    "qci": {"label": "QCI", "pattern": "^.+$"},
+    "muMimoLayer": {"label": "Layer at MU-MIMO", "pattern": "^[1-9][0-9]*$"},
+    "bin": {"label": "Distribution Bin X", "pattern": "^Bin.*$"},
+    "modulation": {"label": null, "pattern": "^(Qpsk|16Qam|64Qam|256Qam)$"},
+    "resType": {"label": null, "pattern": "^.+$"},
+    "source": "labels: KPM v03.00 8.3.11 pp.30-31 (PLMN ID, Slice ID, 5QI, QFI, QCI, Layer at MU-MIMO, Distribution Bin X/Y/Z); no KPM label exists for a modulation or a QoS resource type"
+  },
+  "entries": [
+    {
+      "name": "TB.TotNbrDl",
+      "document": "28.552", "version": "V20.2.0", "clause": "5.1.1.7.3", "title": "Total number of DL TBs", "pages": [112],
+      "objectClass": "NRCellDU", "rat": "NR", "layer": "MAC",
+      "unit": "count", "unitSource": "item d) 'Each measurement is an integer'; the clause states no unit: a count of TBs per granularity period",
+      "dataType": "INTEGER", "dataTypeSource": "item d)",
+      "owningNode": ["gnb"],
+      "countingEvent": "On transmission by the gNB of TB to UE during the period of measurement; all transmitted TBs, initial and HARQ re-transmission, successful and failed (items a), c))",
+      "splitOnly": false, "dcExcluded": false,
+      "perUeAllowed": false, "perUeSource": "KPM v03.00 7.9 pp.13-14 lists no TB-related measurement type",
+      "nameForms": {"total": false, "totalBasis": "item e) p.112 lists only TB.TotNbrDl.X (X = the MU-MIMO layer). Items a), c) split the count per layer only 'at MU-MIMO case', and scenario-zero is SISO (ns-3-mmwave-oran@74c165f1 scratch/scenario-zero.cc:525,527, one antenna each side), but reading the bare name as the total would go beyond item e); a per-cell TB counter must settle the name before it uses the bare form", "templates": [["muMimoLayer"]]},
+      "v17Identical": true, "v17": {"clause": "5.1.1.7.3", "pages": [77, 78]},
+      "legacyName": {"map": "TB.TotNbrDl.1", "v17": null},
+      "valueChecks": [
+        {"kind": "gnb", "list": "cell", "src": "/cell/du/TB.TotNbrDl.1", "xform": "none", "holds": false,
+         "source": ["oran-interface@53253fe helper/mmwave-indication-message-helper.cc:123", "ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-enb-net-device.cc:1128-1130,1309", "ns-3-mmwave-oran@74c165f1 src/mmwave/helper/mmwave-phy-trace.cc:242-248,398-422", "ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-spectrum-phy.cc:707-732"],
+         "reason": "The value is the sum over the en-gNB's UE map of the per-(RNTI, cell) count that UpdateTraces increments for every DL TB (initial or re-transmission, corrupt or not) the UE PHY ends receiving from this cell, reset per UE at each DU report. It drops counted TBs on two paths every SN change reaches (gaps), so it is not the number of DL TBs the gNB transmitted in the period. A correct counter counts per cell on transmission by the gNB; its counting site is not chosen here.",
+         "gaps": ["the source en-gNB removes a UE from its UE map on the X2 UE CONTEXT RELEASE of every SN change (ns-3-mmwave-oran@74c165f1 src/lte/model/lte-enb-rrc.cc:5582-5612,5892-5900) without reporting its per-(RNTI, cell) count, and RNTIs are not reused (:5869), so the TBs the UE received from this cell since the last report are never reported", "a TB the source cell sends after the UE PHY has re-synchronised to the target cell is dropped before the trace by the cell check of ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-spectrum-phy.cc:431-437, so it is never counted, although the clause counts on transmission by the gNB"],
+         "residuals": ["the count is taken at the end of the UE's reception of the TB, inside the slot of the transmission, so a TB in the last slot before a report can fall into the next period"],
+         "maxValue": 224000, "maxValueBasis": "<= 14 TBs per slot per cell (one per allocation of >= 1 of 14 symbols) x <= 16000 slots per period (indicationPeriodicity <= 2.0 s, scenario-zero.cc:244-247; slot >= 0.125 ms, numerology 2 or 3, src/mmwave/model/mmwave-phy-mac-common.cc:47-52)"}
+      ]
+    },
+    {
+      "name": "TB.TotNbrDlInitial",
+      "document": "28.552", "version": "V20.2.0", "clause": "5.1.1.7.1", "title": "Total number of DL initial TBs", "pages": [111, 112],
+      "objectClass": "NRCellDU", "rat": "NR", "layer": "MAC",
+      "unit": "count", "unitSource": "item d) 'A single integer value'; the clause states no unit: a count of TBs per granularity period",
+      "dataType": "INTEGER", "dataTypeSource": "item d)",
+      "owningNode": ["gnb"],
+      "countingEvent": "On transmission by the gNB of TB to UE during the period of measurement; HARQ re-transmissions are excluded (items a), c))",
+      "splitOnly": false, "dcExcluded": false,
+      "perUeAllowed": false, "perUeSource": "KPM v03.00 7.9 pp.13-14 lists no TB-related measurement type",
+      "nameForms": {"total": true, "totalBasis": "item e) lists the bare form TB.TotNbrDlInitial; the modulation split is optional (items a), c))", "templates": [["modulation"]]},
+      "v17Identical": true, "v17": {"clause": "5.1.1.7.1", "pages": [77]},
+      "legacyName": {"map": "TB.TotNbrDlInitial", "v17": null},
+      "valueChecks": [
+        {"kind": "gnb", "list": "cell", "src": "/cell/du/TB.TotNbrDlInitial", "xform": "none", "holds": false,
+         "source": ["oran-interface@53253fe helper/mmwave-indication-message-helper.cc:124", "ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-enb-net-device.cc:1133-1135,1309", "ns-3-mmwave-oran@74c165f1 src/mmwave/helper/mmwave-phy-trace.cc:250-254,398-422", "ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-spectrum-phy.cc:707-732"],
+         "reason": "The value is the sum over the en-gNB's UE map of the per-(RNTI, cell) count that UpdateTraces increments for every DL TB with redundancy version 0 the UE PHY ends receiving from this cell; HARQ re-transmissions (rv != 0) are excluded as the clause asks. It drops counted TBs on the same two SN-change paths as TB.TotNbrDl (gaps). A correct counter counts per cell on transmission by the gNB; its counting site is not chosen here.",
+         "gaps": ["the source en-gNB removes a UE from its UE map on the X2 UE CONTEXT RELEASE of every SN change (ns-3-mmwave-oran@74c165f1 src/lte/model/lte-enb-rrc.cc:5582-5612,5892-5900) without reporting its per-(RNTI, cell) count, and RNTIs are not reused (:5869), so the TBs the UE received from this cell since the last report are never reported", "a TB the source cell sends after the UE PHY has re-synchronised to the target cell is dropped before the trace by the cell check of ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-spectrum-phy.cc:431-437, so it is never counted, although the clause counts on transmission by the gNB"],
+         "residuals": ["the count is taken at the end of the UE's reception of the TB, inside the slot of the transmission"],
+         "maxValue": 224000, "maxValueBasis": "as TB.TotNbrDl: <= 14 TBs per slot x <= 16000 slots per period"}
+      ]
+    },
+    {
+      "name": "RRC.ConnMean",
+      "document": "28.552", "version": "V20.2.0", "clause": "5.1.1.4.1", "title": "Mean number of RRC Connections", "pages": [68],
+      "objectClass": "NRCellCU", "rat": "NR", "layer": "RRC",
+      "unit": "count", "unitSource": "item d) 'a single integer value'; the clause states no unit: a mean number of users",
+      "dataType": "INTEGER", "dataTypeSource": "item d)",
+      "owningNode": ["gnb"],
+      "countingEvent": "Sampling at a pre-defined interval the number of users in RRC connected mode for each NR cell, then taking the arithmetic mean (item c))",
+      "splitOnly": false, "dcExcluded": true, "dcExcludedSource": "1 Scope p.28: the NG-RAN measurements apply also to EN-DC 'but not to the RRC connection related measurements which are handled by E-UTRAN for EN-DC (those are measured according to TS 32.425)'",
+      "perUeAllowed": false, "perUeSource": "a cell count of users; the map has no UE row for it",
+      "nameForms": {"total": true, "totalBasis": "item e) lists the bare form RRC.ConnMean; the PLMN split is optional", "templates": [["plmn"]]},
+      "v17Identical": false, "v17": {"clause": "5.1.1.4.1", "pages": [48], "note": "V20.2.0 adds the optional UE-type filter (RRC.ConnMean_UEType); the unfiltered definition is otherwise the same"},
+      "legacyName": {"map": "RRC.ConnMean", "v17": null},
+      "valueChecks": [
+        {"kind": "gnb", "list": "cell", "src": "/cell/cuCp/meanRrcUes", "xform": "none", "holds": false,
+         "source": ["ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-enb-net-device.cc:603,883-891,893-907,918,1017", "ns-3-mmwave-oran@74c165f1 src/lte/model/lte-enb-rrc.cc:5582-5612"],
+         "reason": "SaveActiveUes samples the size of the en-gNB RRC's UE map every 10 ms and ComputeMeanUes averages the samples since the previous CU-CP report. In EN-DC the RRC connection is the master eNB's (28.552 1 p.28 sends the measurement to 32.425), so the en-gNB has no RRC connections to count; its UE map holds SCG contexts, and during an SN change the source still holds a context the target already holds.",
+         "residuals": []}
+      ]
+    },
+    {
+      "name": "RRC.ConnMean",
+      "document": "32.425", "version": "V19.0.0", "clause": "4.1.3.1", "title": "Mean number of RRC Connections", "pages": [19],
+      "objectClass": "EUtranCellFDD, EUtranCellTDD", "rat": "E-UTRA", "layer": "RRC",
+      "unit": "count", "unitSource": "item d) 'A single integer value'; the clause states no unit: a mean number of RRC connections",
+      "dataType": "INTEGER", "dataTypeSource": "item d)",
+      "owningNode": ["enb"],
+      "countingEvent": "Sampling at a pre-defined interval the number of RRC connections for each E-UTRAN cell, then taking the arithmetic mean (item c))",
+      "splitOnly": false, "dcExcluded": false,
+      "perUeAllowed": false, "perUeSource": "a cell count of connections; the map has no UE row for it",
+      "nameForms": {"total": true, "totalBasis": "item e) gives only the bare form", "templates": []},
+      "v17Identical": null, "v17": null,
+      "legacyName": {"map": "RRC.ConnMean", "v17": null},
+      "valueChecks": [
+        {"kind": "enb", "list": "cell", "src": "/cell/cuCp/meanRrcUes", "xform": "none", "holds": false,
+         "source": ["ns-3-mmwave-oran@74c165f1 src/lte/model/lte-enb-net-device.cc:1041,1283-1306,1318,1354", "ns-3-mmwave-oran@74c165f1 src/lte/model/lte-spectrum-phy.cc:222-227", "ns-3-mmwave-oran@74c165f1 src/lte/model/lte-enb-rrc.cc:3177-3183", "ns-3-mmwave-oran@74c165f1 scratch/scenario-zero.cc:492,551"],
+         "reason": "Attach bound not yet proven by a run. SaveActiveUes samples the size of the eNB RRC's UE map every 10 ms and ComputeMeanUes takes the mean of the samples since the previous CU-CP report. The UE map also holds UE contexts that are not yet RRC-connected: a context exists from random access on, LTE control errors are on by default (lte-spectrum-phy.cc:222-227), so a random access can fail and its context then lives until the 15 ms connection-request timeout (lte-enb-rrc.cc:3177-3183). Such a context is counted as a connection on every sample it spans, and how many samples that is has not been measured: scenario-zero traces no RRC state, so no run shows that the count is off by at most 1 of the clause's 10 ms sampling steps per attach.",
+         "interpretations": ["integer conversion: item d) asks for a single integer value and states no rounding, so the truncated mean (the integer division at :1301-1302 runs before std::round, which then has no effect) is a conversion the clause leaves open"],
+         "residuals": [],
+         "reAudit": "when scenario-zero's ns3::MmWaveHelper::UseIdealRrc (true at scenario-zero.cc:492) is set false: real RRC messages add delay and loss to every attach, so the attach bound must then be proven by a run under that setting, not under ideal RRC",
+         "maxValue": 255, "maxValueBasis": "<= the scenario's UE count, a uint8_t (scenario-zero.cc:553)"}
+      ]
+    },
+    {
+      "name": "DRB.PdcpSduVolumeDl",
+      "document": "32.425", "version": "V19.0.0", "clause": "4.4.7.1", "title": "DL cell PDCP SDU Data Volume", "pages": [58],
+      "objectClass": "EUtranCellFDD, EUtranCellTDD", "rat": "E-UTRA", "layer": "PDCP",
+      "unit": "Kbit", "unitSource": "KPM v03.00 7.9.1 p.14 replaces the clause's Mbit with Kbit for DRB.PdcpSduVolumeDl_Filter (TS 32.425 clause 4.4.7.1)",
+      "dataType": "INTEGER", "dataTypeSource": "item d) and KPM v03.00 7.9.1 p.14",
+      "owningNode": ["enb"],
+      "countingEvent": "Counting the number of bits entering the eNodeB/RN, at the PDCP SDU level, per configured PLMN ID and DL QoS profile (item c)); the volume delivered from the PDCP layer to the RLC layer (item a))",
+      "splitOnly": false, "dcExcluded": false,
+      "perUeAllowed": true, "perUeSource": "KPM v03.00 7.9 p.13: Data volume, measured per UE",
+      "nameForms": {"total": true, "totalBasis": "item e) gives only DRB.PdcpSduVolumeDl_Filter; the bare name is its unfiltered total under interpretations.filter", "templates": []},
+      "v17Identical": null, "v17": null,
+      "legacyName": {"map": "DRB.PdcpSduVolumeDl", "v17": null},
+      "valueChecks": [
+        {"kind": "enb", "list": "ue", "src": "/cuUp/DRB.PdcpSduVolumeDl_Filter.UEID", "xform": "none", "holds": false,
+         "source": ["oran-interface@53253fe helper/lte-indication-message-helper.cc:46", "ns-3-mmwave-oran@74c165f1 src/lte/model/lte-enb-net-device.cc:1110-1111,1180,1184-1188", "ns-3-mmwave-oran@74c165f1 src/lte/model/mc-enb-pdcp.cc:221,238,259", "ns-3-mmwave-oran@74c165f1 src/lte/helper/mmwave-bearer-stats-calculator.cc:218,704-708"],
+         "reason": "The value is the UE's PDCP PDU kbit of the period: 8 x the bytes of every PDU the master eNB's McEnbPdcp passed to the LTE RLC or sent over X2, divided by 1e3 and rounded. Those are PDCP PDU bytes, the PDCP header included (added at mc-enb-pdcp.cc:259 before the traces at :221 and :238), not the PDCP SDU bits the clause counts. The map also carries the value as REAL, not the clause's INTEGER.",
+         "residuals": []}
+      ]
+    },
+    {
+      "name": "DRB.PdcpSduBitrateDl",
+      "document": "32.425", "version": "V19.0.0", "clause": "4.4.1.1", "title": "Average DL cell PDCP SDU bit-rate", "pages": [48],
+      "objectClass": "EUtranCellFDD, EUtranCellTDD", "rat": "E-UTRA", "layer": "PDCP",
+      "unit": "kbit/s", "unitSource": "item d) 'an integer value representing the bit-rate measured in kbit/s'; KPM v03.00 7.9.1 p.14 lists no replacement",
+      "dataType": "INTEGER", "dataTypeSource": "item d)",
+      "owningNode": ["enb"],
+      "countingEvent": "Accumulating the number of bits entering the eNodeB/RN at the PDCP SDU level, less the PDCP SDUs forwarded over X2/S1 to another eNodeB during handover, divided by the measurement period; separate counters per QCI (item c))",
+      "splitOnly": false, "dcExcluded": false,
+      "perUeAllowed": true, "perUeSource": "KPM v03.00 7.9 p.13: Throughput, measured per UE",
+      "nameForms": {"total": false, "totalBasis": "item e) gives only DRB.PdcpSduBitrateDl.QCI; item d) names the sum over QCIs with a .sum suffix, not with the bare name", "templates": [["qci"]]},
+      "v17Identical": null, "v17": null,
+      "legacyName": {"map": "DRB.PdcpSduBitRateDl", "v17": null},
+      "valueChecks": [
+        {"kind": "enb", "list": "ue", "src": "/cuUp/DRB.PdcpSduBitRateDl.UEID", "xform": "none", "holds": false,
+         "source": ["oran-interface@53253fe helper/lte-indication-message-helper.cc:52", "ns-3-mmwave-oran@74c165f1 src/lte/model/lte-enb-net-device.cc:1110-1111,1167,1184-1188", "ns-3-mmwave-oran@74c165f1 src/lte/model/mc-enb-pdcp.cc:221,238,259"],
+         "reason": "The value is the UE's PDCP PDU kbit of the period (the DRB.PdcpSduVolumeDl value, the PDCP header included) divided by the E2 report period, a double: PDU bits, not the PDCP SDU bits the clause counts, carried as REAL, not the clause's INTEGER kbit/s. The clause splits the measurement per QCI, a sub-counter KPM v03.00 8.3.11 carries as a QCI label, and defines no bare-name total. The legacy name DRB.PdcpSduBitRateDl also misspells the clause's DRB.PdcpSduBitrateDl.",
+         "residuals": []}
+      ]
+    },
+    {
+      "name": "DRB.PdcpSduDelayDl",
+      "document": "32.425", "version": "V19.0.0", "clause": "4.4.3.1", "title": "Average DL PDCP SDU delay", "pages": [52],
+      "objectClass": "EUtranCellFDD, EUtranCellTDD", "rat": "E-UTRA", "layer": "PDCP",
+      "unit": "ms", "unitSource": "item d) 'an integer value representing the mean delay in ms'",
+      "dataType": "INTEGER", "dataTypeSource": "item d)",
+      "owningNode": ["enb"],
+      "countingEvent": "The average (arithmetic mean) PDCP SDU delay on the downlink, obtained according to the definition in 3GPP TS 36.314, split per QCI (items a), c))",
+      "splitOnly": false, "dcExcluded": false,
+      "perUeAllowed": true, "perUeSource": "KPM v03.00 7.9 p.13: Delay, measured per UE",
+      "nameForms": {"total": false, "totalBasis": "item e) gives only DRB.PdcpSduDelayDl.QCI (and DRB.PdcpSduDelayDlRN.QCI); item d) names the sum value with a .sum suffix, not with the bare name", "templates": [["qci"]]},
+      "v17Identical": null, "v17": null,
+      "legacyName": {"map": "DRB.PdcpSduDelayDl", "v17": null},
+      "valueChecks": [
+        {"kind": "enb", "list": "cell", "src": "/cell/cuUp/DRB.PdcpSduDelayDl", "xform": "none", "holds": false,
+         "source": ["oran-interface@53253fe helper/lte-indication-message-helper.cc:61", "ns-3-mmwave-oran@74c165f1 src/lte/model/lte-enb-net-device.cc:1164-1165,1214-1218,1227", "ns-3-mmwave-oran@74c165f1 src/lte/helper/mmwave-bearer-stats-calculator.cc:736-746"],
+         "reason": "The value is the unweighted mean of the per-UE mean PDCP delays of the UEs in the eNB's UE map, in units of 0.1 ms (ns / 1e5), as a double: not ms and not the clause's INTEGER. The clause splits the measurement per QCI, a sub-counter KPM v03.00 8.3.11 carries as a QCI label, and defines no bare-name total.",
+         "residuals": []},
+        {"kind": "enb", "list": "ue", "src": "/cuUp/DRB.PdcpSduDelayDl.UEID", "xform": "none", "holds": false,
+         "source": ["oran-interface@53253fe helper/lte-indication-message-helper.cc:55", "ns-3-mmwave-oran@74c165f1 src/lte/model/lte-enb-net-device.cc:1164,1184-1188", "ns-3-mmwave-oran@74c165f1 src/lte/helper/mmwave-bearer-stats-calculator.cc:736-746"],
+         "reason": "The value is the UE's mean PDCP delay of the period in units of 0.1 ms (ns / 1e5), as a double: not ms and not the clause's INTEGER. The clause splits the measurement per QCI, a sub-counter KPM v03.00 8.3.11 carries as a QCI label, and defines no bare-name total.",
+         "residuals": []}
+      ]
+    },
+    {
+      "name": "DRB.PdcpSduVolumeDL",
+      "document": "28.552", "version": "V20.2.0", "clause": "5.1.2.1.1.1", "title": "DL Cell PDCP SDU Data Volume", "pages": [183],
+      "objectClass": "NRCellCU", "rat": "NR", "layer": "PDCP",
+      "unit": "Kbit", "unitSource": "KPM v03.00 7.9.1 p.14 replaces the clause's Mbit with Kbit for DRB.PdcpSduVolumeDL_Filter (KPM cites 28.552 clause 5.1.2.1.2.1, which V20.2.0 numbers 5.1.2.1.1.1)",
+      "dataType": "INTEGER", "dataTypeSource": "item d) and KPM v03.00 7.9.1 p.14",
+      "owningNode": ["gnb"],
+      "countingEvent": "Counting the number of bits entering the NG-RAN PDCP layers, at the PDCP SDU level (item c)); 5.1.2 p.183: valid only for a non-split gNB",
+      "splitOnly": false, "dcExcluded": false,
+      "perUeAllowed": true, "perUeSource": "KPM v03.00 7.9 p.13: Data volume, measured per UE",
+      "nameForms": {"total": true, "totalBasis": "item e) gives only DRB.PdcpSduVolumeDL_Filter; the bare name is its unfiltered total under interpretations.filter", "templates": []},
+      "v17Identical": false, "v17": {"clause": "5.1.2.1.1.1", "pages": [120, 121], "note": "V20.2.0 adds the optional per-UE-type split and the UEType filter"},
+      "legacyName": {"map": "DRB.PdcpSduVolumeDL", "v17": null},
+      "valueChecks": [
+        {"kind": "gnb", "list": "cell", "src": "/cell/cuUp/DRB.PdcpSduVolumeDL", "xform": "none", "holds": false, "pendingFix": "P9",
+         "source": ["oran-interface@53253fe helper/mmwave-indication-message-helper.cc:56", "ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-enb-net-device.cc:673-709,835-837"],
+         "reason": "The value is the SDU volume of the master eNB's McEnbPdcp for the UEs in this cell's UE map. The en-gNB hosts no PDCP for the MN-terminated split bearer, so no bit enters this node's PDCP and the clause's value at the en-gNB is 0. The fix that pendingFix names reports 0 here and moves the volume to DRB.PdcpSduVolumeX2DL, which counts at the receiving cell both the PDCP PDUs the MN sends over X2 and the data a source SN forwards to it over X2 during an SN change.",
+         "residuals": []}
+      ]
+    },
+    {
+      "name": "DRB.PdcpSduVolumeUL",
+      "document": "28.552", "version": "V20.2.0", "clause": "5.1.2.1.2.1", "title": "UL Cell PDCP SDU Data Volume", "pages": [185],
+      "objectClass": "NRCellCU", "rat": "NR", "layer": "PDCP",
+      "unit": "Kbit", "unitSource": "KPM v03.00 7.9.1 p.14 replaces the clause's Mbit with Kbit for DRB.PdcpSduVolumeUL_Filter (KPM cites 28.552 clause 5.1.2.1.2.2, which V20.2.0 uses for the X2 UL volume)",
+      "dataType": "INTEGER", "dataTypeSource": "item d) and KPM v03.00 7.9.1 p.14",
+      "owningNode": ["gnb"],
+      "countingEvent": "Counting the number of bits delivered from the PDCP layer to higher layers, at the PDCP SDU level (item c)); 5.1.2 p.183: valid only for a non-split gNB",
+      "splitOnly": false, "dcExcluded": false,
+      "perUeAllowed": true, "perUeSource": "KPM v03.00 7.9 p.13: Data volume, measured per UE",
+      "nameForms": {"total": true, "totalBasis": "item e) gives only DRB.PdcpSduVolumeUL_Filter; the bare name is its unfiltered total under interpretations.filter", "templates": []},
+      "v17Identical": false, "v17": {"clause": "5.1.2.1.2.1", "pages": [122], "note": "V20.2.0 adds the optional per-UE-type split and the UEType filter"},
+      "legacyName": {"map": "DRB.PdcpSduVolumeUL", "v17": null},
+      "valueChecks": [
+        {"kind": "gnb", "list": "cell", "src": "/cell/cuUp/DRB.PdcpSduVolumeUL", "xform": "none", "holds": false, "pendingFix": "P9",
+         "source": ["oran-interface@53253fe helper/mmwave-indication-message-helper.cc:55", "ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-enb-net-device.cc:673-709,835-837"],
+         "reason": "The value is the UL SDU volume of the master eNB's McEnbPdcp for the UEs in this cell's UE map; the en-gNB hosts no PDCP for the MN-terminated split bearer, so its value is 0. The fix that pendingFix names reports 0 here and moves the volume to DRB.PdcpSduVolumeX2UL under the same counting rule as DRB.PdcpSduVolumeX2DL.",
+         "residuals": []}
+      ]
+    },
+    {
+      "name": "QosFlow.PdcpPduVolumeDL",
+      "document": "28.552", "version": "V20.2.0", "clause": "5.1.3.6.1.1", "title": "DL PDCP PDU Data Volume", "pages": [188, 196, 197],
+      "objectClass": "GNBCUUPFunction, NRCellCU", "rat": "NR", "layer": "PDCP",
+      "unit": "Kbit", "unitSource": "KPM v03.00 7.9.1 p.14 replaces the clause's Mbit with Kbit for QosFlow.PdcpPduVolumeDL_Filter",
+      "dataType": "INTEGER", "dataTypeSource": "item d) and KPM v03.00 7.9.1 p.14",
+      "owningNode": ["gnb"],
+      "countingEvent": "Counting the number of DL PDCP PDU bits sent from the gNB-CU to the gNB-DU (item c))",
+      "splitOnly": true, "splitOnlySource": "5.1.3 p.188: 'Performance measurements valid for split gNB deployment scenario'",
+      "dcExcluded": true, "dcExcludedSource": "item c) p.196: 'The measurements of DL Cell PDCP PDU Data Volume in Dual-Connectivity scenarios is not included'",
+      "perUeAllowed": true, "perUeSource": "KPM v03.00 7.9 p.13: Data volume, measured per UE",
+      "nameForms": {"total": true, "totalBasis": "item e) gives only QosFlow.PdcpPduVolumeDL_Filter; the bare name is its unfiltered total under interpretations.filter", "templates": []},
+      "v17Identical": false, "v17": {"clause": "5.1.3.6.1.1 (printed as 5.1.3.6.1)", "pages": [132, 133], "note": "V20.2.0 adds the per-UE-type split and spells out the filter combinations"},
+      "legacyName": {"map": "QosFlow.PdcpPduVolumeDL", "v17": null},
+      "valueChecks": [
+        {"kind": "gnb", "list": "cell", "src": "/cell/du/QosFlow.PdcpPduVolumeDL_Filter", "xform": "none", "holds": false,
+         "source": ["oran-interface@53253fe helper/mmwave-indication-message-helper.cc:132", "ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-enb-net-device.cc:1137-1139", "ns-3-mmwave-oran@74c165f1 src/mmwave/helper/mmwave-phy-trace.cc:262"],
+         "reason": "MAC TB bytes the UE PHY received (re-transmissions included), not PDCP PDU bits sent CU to DU; the en-gNB is non-split and every bearer is DC.", "residuals": []},
+        {"kind": "gnb", "list": "ue", "src": "/cuUp/QosFlow.PdcpPduVolumeDL_Filter.UEID", "xform": "none", "holds": false,
+         "source": ["oran-interface@53253fe helper/mmwave-indication-message-helper.cc:44", "ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-enb-net-device.cc:711-726,820-822"],
+         "reason": "NR RLC transmitted kbit of the UE's secondary RLCs at the en-gNB; there is no CU-DU interface and the bearer is DC.", "residuals": []},
+        {"kind": "enb", "list": "ue", "src": "/cuUp/txPdcpPduBytesNrRlc", "xform": "none", "holds": false,
+         "source": ["ns-3-mmwave-oran@74c165f1 src/lte/model/lte-enb-net-device.cc:1108-1157,1196-1198"],
+         "reason": "An NR clause on an E-UTRA node (eNB rows are judged against 32.425 only): the MN PDCP kbit not sent to the LTE RLC.", "residuals": []}
+      ]
+    },
+    {
+      "name": "RRU.PrbDl",
+      "document": "28.552", "version": "V20.2.0", "clause": "5.1.1.2.1", "title": "DL Total PRB Usage", "pages": [44],
+      "objectClass": "NRCellDU", "rat": "NR", "layer": "MAC",
+      "unit": "%", "unitSource": "items a), d): a percentage, a single integer value from 0 to 100",
+      "dataType": "INTEGER", "dataTypeSource": "item d)",
+      "owningNode": ["gnb"],
+      "countingEvent": "M(T) = M1(T) / P(T) x 100: PRBs used for DL traffic over the PRBs available for DL traffic during T (item c))",
+      "splitOnly": false, "dcExcluded": false,
+      "perUeAllowed": true, "perUeSource": "KPM v03.00 7.9 p.13: Radio resource utilization, measured per UE",
+      "nameForms": {"total": true, "totalBasis": "item e): RRU.PrbDl is the DL PRB usage for all traffic", "templates": [["plmn"], ["snssai"], ["snssai", "resType"]]},
+      "v17Identical": false, "v17": {"clause": "5.1.1.2.1", "pages": [33, 34], "note": "V17.17.0 names it RRU.PrbTotDl; V20.2.0 renames it and adds the PLMN, S-NSSAI, resource-type subcounters and the UEType filter"},
+      "legacyName": {"map": "RRU.PrbTotDl", "v17": "RRU.PrbTotDl"},
+      "valueChecks": [
+        {"kind": "gnb", "list": "cell", "src": "/cell/du/dlPrbUsage", "xform": "none", "holds": false,
+         "source": ["ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-enb-net-device.cc:1155-1177,1319,1341,1344-1345", "ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-phy-mac-common.cc:94-95"],
+         "reason": "The share of the period's symbols scheduled for DL TBs, with every slot counted as 14 symbols, the 1 DL and 1 UL control symbol included (mmwave-phy-mac-common.cc:94-95), so a full cell reads about 86 %, not 100 %; each UE's PRB estimate is truncated into a uint32_t sum (:1118, :1177). P(T) is not the PRBs available for DL traffic. Successor rule (a V17-only name moves to its V20.2.0 successor only when unit, object, counting point and value check are the same): RRU.PrbTotDl does not move to RRU.PrbDl.",
+         "residuals": []}
+      ]
+    },
+    {
+      "name": "DRB.EstabSucc",
+      "document": "28.552", "version": "V20.2.0", "clause": "5.1.1.10.2", "title": "Number of DRBs successfully setup", "pages": [115, 116],
+      "objectClass": "NRCellCU", "rat": "NR", "layer": "RRC",
+      "unit": "count", "unitSource": "item d) 'Each subcounter is an integer value'; the clause states no unit",
+      "dataType": "INTEGER", "dataTypeSource": "item d)",
+      "owningNode": ["gnb"],
+      "countingEvent": "On transmission of INITIAL CONTEXT SETUP RESPONSE / PDU SESSION RESOURCE SETUP RESPONSE to the AMF, by the number of DRBs the RRCReconfigurationComplete confirms (item c))",
+      "splitOnly": false, "dcExcluded": false,
+      "perUeAllowed": true, "perUeSource": "KPM v03.00 7.9 p.14: DRBs related, measured per UE",
+      "nameForms": {"total": false, "totalBasis": "item e) defines only DRB.EstabSucc.5QI and DRB.EstabSucc.SNSSAI; no total form", "templates": [["fiveQi"], ["snssai"]]},
+      "v17Identical": false, "v17": {"clause": "5.1.1.10.2", "pages": [81], "note": "the texts differ by one ';' in item e)"},
+      "legacyName": {"map": "DRB.EstabSucc.5QI", "v17": null},
+      "valueChecks": [
+        {"kind": "gnb", "list": "ue", "src": "/cuCp/DRB.EstabSucc.5QI.UEID", "xform": "none", "holds": false,
+         "source": ["oran-interface@53253fe helper/mmwave-indication-message-helper.cc:177", "ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-enb-net-device.cc:932,1004-1006"],
+         "reason": "The UE's current DRB count (GetDrbMap().size()) at the report, not the number of DRBs set up successfully during the period; an en-gNB has no NG-AP exchange with the AMF.", "residuals": []}
+      ]
+    }
+  ]
+}

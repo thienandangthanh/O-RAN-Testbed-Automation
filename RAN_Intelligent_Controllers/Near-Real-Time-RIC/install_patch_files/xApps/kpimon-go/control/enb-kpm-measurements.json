@@ -20,7 +20,7 @@
       "measId": 3
     },
     {
-      "measName": "DRB.PdcpSduDelayDl",
+      "measName": "ns3.cuUp.cellAverageLatency",
       "measId": 4
     },
     {
@@ -36,7 +36,7 @@
       "measId": 7
     },
     {
-      "measName": "RRC.ConnMean",
+      "measName": "ns3.cuCp.meanRrcUes",
       "measId": 8
     }
   ],
@@ -58,19 +58,19 @@
       "measId": 1004
     },
     {
-      "measName": "DRB.PdcpSduVolumeDl",
+      "measName": "ns3.cuUp.pdcpTxVolumeDl",
       "measId": 1005
     },
     {
-      "measName": "Tot.PdcpSduNbrDl",
+      "measName": "ns3.cuUp.txDlPackets",
       "measId": 1006
     },
     {
-      "measName": "DRB.PdcpSduBitRateDl",
+      "measName": "ns3.cuUp.pdcpThroughput",
       "measId": 1007
     },
     {
-      "measName": "DRB.PdcpSduDelayDl",
+      "measName": "ns3.cuUp.pdcpLatency",
       "measId": 1008
     },
     {
@@ -82,19 +82,19 @@
       "measId": 1010
     },
     {
-      "measName": "QosFlow.PdcpPduVolumeDL",
+      "measName": "ns3.cuUp.txPdcpPduBytesNrRlc",
       "measId": 1011
     },
     {
-      "measName": "DRB.PdcpPduNbrDl.Qos",
+      "measName": "ns3.cuUp.txPdcpPduNrRlc",
       "measId": 1012
     },
     {
-      "measName": "DRB.EstabSucc.5QI",
+      "measName": "ns3.cuCp.numDrb",
       "measId": 1013
     },
     {
-      "measName": "DRB.RelActNbr.5QI",
+      "measName": "ns3.cuCp.numDrbRelAct",
       "measId": 1014
     },
     {
