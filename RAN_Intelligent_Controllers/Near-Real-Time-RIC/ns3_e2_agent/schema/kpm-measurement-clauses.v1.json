@@ -5,11 +5,11 @@
     "The 3GPP clauses that tests/lint-metric-map.py judges every non-ns3.* name of schema/metric-map.v1.json against.",
     "A gNB row (an en-gNB cell or UE) is judged against 3GPP TS 28.552 V20.2.0 only; an eNB row against 3GPP TS 32.425 V19.0.0 only. Pinned by exact version, no compatibility mode.",
     "Every page is a PDF page of the Zotero attachment named in documents. Every field of an entry comes from a page that was read; nothing here is inferred from another version.",
-    "An entry exists for every 3GPP name the shipped map keeps (today only the two en-gNB rows that carry pendingFix), for every 3GPP name a renamed row used to carry where the judging document defines that measurement, and for the names the lint self-test needs to prove a failure (an entry is not a pass: a row passes only through a value check that holds).",
+    "An entry exists for every 3GPP name the shipped map keeps (the four en-gNB CU-UP PDCP SDU volume rows), for every 3GPP name a renamed row used to carry where the judging document defines that measurement, and for the names the lint self-test needs to prove a failure (an entry is not a pass: a row passes only through a value check that holds).",
     "Entry fields: name (the base name; suffixes are parsed with nameForms), document, version, clause, title, pages, objectClass, rat, layer, unit (KPM v03.00 7.9.1 where it lists the name, else the clause's; 'count' where the clause states no unit), dataType (the clause's item d), or 7.9.1's replacement), owningNode (the node kinds whose function owns the counted event), countingEvent (item c), quoted or condensed), splitOnly, dcExcluded, perUeAllowed (KPM v03.00 7.9 pp.13-14 lists the measurement type for per-UE conversion), nameForms (total: the bare name with noLabel is the clause's total; templates: the suffix slot kinds of item e)), v17Identical (28.552 entries: the clause text of TS 28.552 V17.17.0 is identical after whitespace normalisation; null for 32.425 entries), v17, legacyName (map: the map's name before this registry; v17: the V17.17.0 name when it differs), valueChecks (per map row source and xform: holds, the ns-3 / oran-interface source file:line at the pinned commits, the reason, the residuals, and for an INTEGER entry the bound that keeps the value inside kpimon's int32).",
     "A value check holds only when ns-3 counts the clause's events exactly once on every path the runs reach; only the counting instant may differ, by at most 1 slot for a count or 1 of the clause's own sampling steps for a sampled value (the E2 report period is never a sampling step). An event counted once but, through that shift, in the adjacent period is a residual. This allowance is the project's tolerance, not a 3GPP number.",
     "'gaps' lists the paths the runs reach that drop or add counted events; an entry that lists any gap cannot hold, and every value check that holds carries an explicit empty 'gaps'. 'residuals' lists only counting-instant shifts within the allowance; 'interpretations' lists points the clause leaves open, each with its basis; 'reAudit' names a run-configuration change after which the check must be judged again.",
-    "Source pins: ns-3-mmwave-oran 74c165f1, oran-interface 53253fe (the superproject's submodule pins when the sources were last checked)."
+    "Source pins: ns-3-mmwave-oran 74c165f1, oran-interface 53253fe (the superproject's submodule pins when the sources were last checked); the en-gNB CU-UP PDCP SDU volume entries cite the ns-3-mmwave-oran and oran-interface commits that count them."
   ],
   "documents": {
     "28.552": {"title": "3GPP TS 28.552 Management and orchestration; 5G performance measurements", "version": "V20.2.0", "zotero": "5SZUBP6M", "attachment": "RMU9VRW7", "rat": "NR", "kinds": ["gnb"]},
@@ -212,10 +212,11 @@
       "v17Identical": false, "v17": {"clause": "5.1.2.1.1.1", "pages": [120, 121], "note": "V20.2.0 adds the optional per-UE-type split and the UEType filter"},
       "legacyName": {"map": "DRB.PdcpSduVolumeDL", "v17": null},
       "valueChecks": [
-        {"kind": "gnb", "list": "cell", "src": "/cell/cuUp/DRB.PdcpSduVolumeDL", "xform": "none", "holds": false, "pendingFix": "P9",
-         "source": ["oran-interface@53253fe helper/mmwave-indication-message-helper.cc:56", "ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-enb-net-device.cc:673-709,835-837"],
-         "reason": "The value is the SDU volume of the master eNB's McEnbPdcp for the UEs in this cell's UE map. The en-gNB hosts no PDCP for the MN-terminated split bearer, so no bit enters this node's PDCP and the clause's value at the en-gNB is 0. The fix that pendingFix names reports 0 here and moves the volume to DRB.PdcpSduVolumeX2DL, which counts at the receiving cell both the PDCP PDUs the MN sends over X2 and the data a source SN forwards to it over X2 during an SN change.",
-         "residuals": []}
+        {"kind": "gnb", "list": "cell", "src": "/cell/cuUp/DRB.PdcpSduVolumeDL", "xform": "none", "holds": true,
+         "source": ["oran-interface@0d6bdea helper/mmwave-indication-message-helper.cc:57", "ns-3-mmwave-oran@e32a0e05 src/mmwave/model/mmwave-enb-net-device.cc:686-688,857"],
+         "reason": "The value is the constant 0 that the en-gNB CU-UP report passes (:857). The clause counts the bits entering this node's own PDCP layer; an EN-DC bearer is MN-terminated, its PDCP entity is the master eNB's McEnbPdcp (3GPP TS 37.340 §4.2.2), so no DRB PDCP entity exists at the en-gNB and no bit enters one: 0 on every path. The report aborts if an en-gNB UE context holds a DRB PDCP entity (:688), so the 0 cannot outlive a bearer that would make it false. The volume the MN sends this cell over X2 is DRB.PdcpSduVolumeX2DL.",
+         "gaps": [], "residuals": [], "maxValue": 0, "maxValueBasis": "the constant 0 (:857)",
+         "reAudit": "when a bearer whose PDCP is at the en-gNB (an SN-terminated bearer) is configured"}
       ]
     },
     {
@@ -232,10 +233,57 @@
       "v17Identical": false, "v17": {"clause": "5.1.2.1.2.1", "pages": [122], "note": "V20.2.0 adds the optional per-UE-type split and the UEType filter"},
       "legacyName": {"map": "DRB.PdcpSduVolumeUL", "v17": null},
       "valueChecks": [
-        {"kind": "gnb", "list": "cell", "src": "/cell/cuUp/DRB.PdcpSduVolumeUL", "xform": "none", "holds": false, "pendingFix": "P9",
-         "source": ["oran-interface@53253fe helper/mmwave-indication-message-helper.cc:55", "ns-3-mmwave-oran@74c165f1 src/mmwave/model/mmwave-enb-net-device.cc:673-709,835-837"],
-         "reason": "The value is the UL SDU volume of the master eNB's McEnbPdcp for the UEs in this cell's UE map; the en-gNB hosts no PDCP for the MN-terminated split bearer, so its value is 0. The fix that pendingFix names reports 0 here and moves the volume to DRB.PdcpSduVolumeX2UL under the same counting rule as DRB.PdcpSduVolumeX2DL.",
-         "residuals": []}
+        {"kind": "gnb", "list": "cell", "src": "/cell/cuUp/DRB.PdcpSduVolumeUL", "xform": "none", "holds": true,
+         "source": ["oran-interface@0d6bdea helper/mmwave-indication-message-helper.cc:56", "ns-3-mmwave-oran@e32a0e05 src/mmwave/model/mmwave-enb-net-device.cc:686-688,857"],
+         "reason": "The value is the constant 0 that the en-gNB CU-UP report passes (:857). The clause counts the bits this node's own PDCP layer delivers to higher layers; an EN-DC bearer is MN-terminated, its PDCP entity is the master eNB's McEnbPdcp (3GPP TS 37.340 §4.2.2), so no DRB PDCP entity exists at the en-gNB and none delivers a bit: 0 on every path. The report aborts if an en-gNB UE context holds a DRB PDCP entity (:688), so the 0 cannot outlive a bearer that would make it false. The volume this cell sends the MN over X2 is DRB.PdcpSduVolumeX2UL.",
+         "gaps": [], "residuals": [], "maxValue": 0, "maxValueBasis": "the constant 0 (:857)",
+         "reAudit": "when a bearer whose PDCP is at the en-gNB (an SN-terminated bearer) is configured"}
+      ]
+    },
+    {
+      "name": "DRB.PdcpSduVolumeX2UL",
+      "document": "28.552", "version": "V20.2.0", "clause": "5.1.2.1.2.2", "title": "UL Cell PDCP SDU Data Volume on X2 Interface", "pages": [185, 186],
+      "objectClass": "NRCellCU", "rat": "NR", "layer": "PDCP",
+      "unit": "Kbit", "unitSource": "KPM v03.00 7.9.1 p.14 replaces the clause's Mbit with Kbit for DRB.PdcpSduVolumeX2UL_Filter (TS 28.552 clause 5.1.2.1.2.2)",
+      "dataType": "INTEGER", "dataTypeSource": "item d) and KPM v03.00 7.9.1 p.14",
+      "owningNode": ["gnb"],
+      "countingEvent": "Counting the number of bits transferred in the uplink through X2 interface, at the PDCP SDU level (item c)); the data volume in the uplink delivered on X2 interface in NSA scenarios (item a)); Annex A.25 p.403: the data volume transferred between MN and SN should be counted",
+      "splitOnly": false, "dcExcluded": false,
+      "perUeAllowed": true, "perUeSource": "KPM v03.00 7.9 p.13: Data volume, measured per UE",
+      "nameForms": {"total": true, "totalBasis": "item e) gives the bare name DRB.PdcpSduVolumeX2UL as a form beside DRB.PdcpSduVolumeX2UL_Filter", "templates": []},
+      "v17Identical": false, "v17": {"clause": "5.1.2.1.2.2", "pages": [122, 123], "note": "V17.17.0 gives only the _Filter form and filters per PLMN ID and QoS level, without S-NSSAI; V20.2.0 adds the bare name and the S-NSSAI filter"},
+      "legacyName": {"map": null, "v17": null},
+      "valueChecks": [
+        {"kind": "gnb", "list": "cell", "src": "/cell/cuUp/DRB.PdcpSduVolumeX2UL", "xform": "none", "holds": true,
+         "source": ["ns-3-mmwave-oran@e32a0e05 src/lte/model/epc-x2.cc:1304", "ns-3-mmwave-oran@e32a0e05 src/mmwave/model/mmwave-enb-net-device.cc:1583,1614,848-850,857", "oran-interface@0d6bdea helper/mmwave-indication-message-helper.cc:59"],
+         "reason": "The value is the PDCP SDU kbit of every McForwardUplinkData PDU this cell's EpcX2 sends to the master eNB in the period: the UL PDCP PDUs this cell's RLC delivers to the MN-hosted PDCP. That is the only X2-U exit of an UL multi-connectivity PDU (the RLC UM, UM low-latency and AM entities hand it to the X2 RLC provider's ReceiveMcPdcpSdu, ns-3-mmwave-oran@4318e43b src/lte/model/lte-rlc-um.cc:1130, lte-rlc-um-lowlat.cc:1322, lte-rlc-am.cc:2816), so each is counted once, at its send by this cell; the trace fires for the local cell of the X2 interface and the device counts only its own cell, reset at every report in every mode.",
+         "gaps": [], "residuals": [],
+         "interpretations": ["counting point: the en-gNB counts at its own X2-U boundary, a DL PDU when its EpcX2 receives it (GTP-U header removed) and an UL PDU when its EpcX2 sends it; the clause names the interface, not the side, and the cell's NRCellCU (item f)) owns the counter, so the instant is this node's own event, not the master eNB's submission one X2 link delay (X2LinkDelay 1 ms) earlier", "SDU bits: 8 x (PDU bytes - 2) per PDU, the PDCP SDU level of item c): every counted PDU is a PDCP Data PDU carrying the 2-octet NR header with a 12-bit SN (3GPP TS 38.323 V19.1.0 \u00a76.2.2.2) of the MN's McEnbPdcp; summed per report and rounded to Kbit once (interpretations.kbitRounding)", "bare name: item e) gives DRB.PdcpSduVolumeX2DL itself as a form, so the bare name with noLabel is the clause's own total"],
+         "maxValue": 200000000, "maxValueBasis": "<= one X2 link (an UL multi-connectivity PDU leaves the en-gNB only towards the master eNB's PDCP) x X2LinkDataRate 100 Gb/s (src/mmwave/helper/mmwave-point-to-point-epc-helper.cc:217-221) x the report period (indicationPeriodicity <= 2.0 s, scenario-zero.cc:320-322) / 1000 = 2e8 kbit",
+         "reAudit": "when a bearer is SN-terminated or uses RLC AM, or the nodes use Xn instead of X2"}
+      ]
+    },
+    {
+      "name": "DRB.PdcpSduVolumeX2DL",
+      "document": "28.552", "version": "V20.2.0", "clause": "5.1.2.1.1.2", "title": "DL Cell PDCP SDU Data Volume on X2 Interface", "pages": [183, 184],
+      "objectClass": "NRCellCU", "rat": "NR", "layer": "PDCP",
+      "unit": "Kbit", "unitSource": "KPM v03.00 7.9.1 p.14 replaces the clause's Mbit with Kbit for DRB.PdcpSduVolumeX2DL_Filter (TS 28.552 clause 5.1.2.1.1.2)",
+      "dataType": "INTEGER", "dataTypeSource": "item d) and KPM v03.00 7.9.1 p.14",
+      "owningNode": ["gnb"],
+      "countingEvent": "Counting the number of bits transferred in the downlink through X2 interface, at the PDCP SDU level (item c)); the data volume in the downlink delivered on X2 interface in DC-scenarios (item a)); Annex A.25 p.403: the data volume transferred between MN and SN should be counted",
+      "splitOnly": false, "dcExcluded": false,
+      "perUeAllowed": true, "perUeSource": "KPM v03.00 7.9 p.13: Data volume, measured per UE",
+      "nameForms": {"total": true, "totalBasis": "item e) gives the bare name DRB.PdcpSduVolumeX2DL as a form beside DRB.PdcpSduVolumeX2DL_Filter", "templates": []},
+      "v17Identical": false, "v17": {"clause": "5.1.2.1.1.2", "pages": [121], "note": "V17.17.0 gives only the _Filter form and filters per PLMN ID and QoS level, without S-NSSAI; V20.2.0 adds the bare name and the S-NSSAI filter"},
+      "legacyName": {"map": null, "v17": null},
+      "valueChecks": [
+        {"kind": "gnb", "list": "cell", "src": "/cell/cuUp/DRB.PdcpSduVolumeX2DL", "xform": "none", "holds": true,
+         "source": ["ns-3-mmwave-oran@e32a0e05 src/lte/model/epc-x2.cc:656", "ns-3-mmwave-oran@e32a0e05 src/mmwave/model/mmwave-enb-net-device.cc:1583,1601,846-850,857", "oran-interface@0d6bdea helper/mmwave-indication-message-helper.cc:60"],
+         "reason": "The value is the PDCP SDU kbit of every McForwardDownlinkData PDU this cell's EpcX2 receives in the period, counted before the secondary-cell-handover forwarding test: the master eNB's split-leg PDUs, the SDUs re-entered after a switch to mmWave, a PDU a source en-gNB redirects and its RLC-buffer forward, each once per receiving cell. Every counted PDU is a whole PDCP PDU: the source en-gNB's RLC-buffer forward at an SN change (ns-3-mmwave-oran@1f1fa3d3 src/lte/model/lte-enb-rrc.cc:905,939; removePdcpHeader false) drops an RLC segment, such as the unsent tail of a segmented SDU at the head of the LteRlcUmLowLat TX buffer (src/lte/model/lte-rlc-um-lowlat.cc:258-282), by its LteRlcSduStatusTag before the D/C test (ns-3-mmwave-oran@1f1fa3d3 src/lte/model/lte-rlc-forwarding-buffer.cc:188-198), so no payload octet is counted as a header.",
+         "gaps": [], "residuals": [],
+         "interpretations": ["counting point: the en-gNB counts at its own X2-U boundary, a DL PDU when its EpcX2 receives it (GTP-U header removed) and an UL PDU when its EpcX2 sends it; the clause names the interface, not the side, and the cell's NRCellCU (item f)) owns the counter, so the instant is this node's own event, not the master eNB's submission one X2 link delay (X2LinkDelay 1 ms) earlier", "SDU bits: 8 x (PDU bytes - 2) per PDU, the PDCP SDU level of item c): every counted PDU is a PDCP Data PDU carrying the 2-octet NR header with a 12-bit SN (3GPP TS 38.323 V19.1.0 \u00a76.2.2.2) of the MN's McEnbPdcp; summed per report and rounded to Kbit once (interpretations.kbitRounding)", "bare name: item e) gives DRB.PdcpSduVolumeX2DL itself as a form, so the bare name with noLabel is the clause's own total", "SN change: a PDU the source en-gNB redirects to the target en-gNB (epc-x2.cc forward map) is counted at both cells, two X2 transfers into two NRCellCUs; the source en-gNB's RLC-buffer forward is counted at the target cell only; so the sum over cells exceeds the master eNB's X2 output during an SN change", "a PDU that arrives counts whatever its RLC user then does with it; the data a switch to LTE returns to the master eNB (untyped X2 UE data) is no en-gNB's DL"],
+         "maxValue": 2000000000, "maxValueBasis": "<= the X2 links into the cell x X2LinkDataRate 100 Gb/s (src/mmwave/helper/mmwave-point-to-point-epc-helper.cc:217-221) x the report period (indicationPeriodicity <= 2.0 s, scenario-zero.cc:320-322) / 1000 kbit. scenario-zero links every pair of eNB and en-gNB nodes (scenario-zero.cc:732, src/mmwave/helper/mmwave-helper.cc:2922-2972), so a cell has nMmWaveEnbNodes links: 2e8 kbit each, 2e9 < 2^31 - 1 for nMmWaveEnbNodes <= 10 (the default is 4); nMmWaveEnbNodes accepts up to 85 (scenario-zero.cc:357-360), where this bound is 1.7e10 and no longer proves the int32 range",
+         "reAudit": "when a bearer is SN-terminated or uses RLC AM, or the nodes use Xn instead of X2; when nMmWaveEnbNodes > 10"}
       ]
     },
     {

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """lint-metric-map.py [metric-map.v1.json] [--registry clauses.json] [--samples trace.ndjson]
-                      [--kpimon-enb enb-kpm-measurements.json] [--require-no-pending] | --self-test
+                      [--kpimon-enb enb-kpm-measurements.json] | --self-test
 
 Lints the ns-3 -> E2SM-KPM metric map. Exit 0 = clean, 1 = findings.
 
@@ -46,11 +46,8 @@ and the clause checks below are skipped (exit 1), because they read the registry
       a digit;
   (7) a V17-only name fails (2) and names its V20.2.0 successor; a row moved to the successor passes only through
       the successor's own entry and value check;
-  (8) a row with pendingFix (only en-gNB cell DRB.PdcpSduVolumeUL/DL, value "P9") whose only findings are its value
-      check is reported as XFAIL, not a finding, and only when that check exists for the row's kind, list and src,
-      has the row's xform and holds false (a missing check is never waived); a pendingFix on a row whose check
-      holds is stale and a finding; any other finding of such a row, a pendingFix row that passes, or a
-      pendingFix anywhere else is a finding. --require-no-pending makes every pendingFix a finding.
+  (8) a row that carries a pendingFix field is a finding: no row's finding is waived, every row passes or fails on
+      its own checks.
 With --kpimon-enb, also requires kpimon's eNB measurement lists
 (install_patch_files/xApps/kpimon-go/control/enb-kpm-measurements.json: e2mgr stores no RAN
 functions for an eNB, so kpimon takes them from that file) to equal this map's kind-enb rows:
@@ -100,9 +97,6 @@ VENDOR_LAYER_EXCEPTIONS = {
                       "ns3.cuUp.txPdcpPduBytesLteRlc"},
     ("du", "RRC"): {"ns3.du.numActiveUes"},
 }
-# the only rows that may carry pendingFix, and the value each must carry; the fix that value names removes the marker
-PENDING_ALLOWED = {("gnb", "cell", "DRB.PdcpSduVolumeUL"): "P9", ("gnb", "cell", "DRB.PdcpSduVolumeDL"): "P9"}
-VALUE = "value check"  # the conjunct a pendingFix row is expected to fail
 
 
 def resolve(root, pointer):
@@ -225,12 +219,11 @@ def row_findings(reg, r):
         out.append(("(3) xform", "xform %r != the value check's %r (the check judges the value after its xform)" % (
             r.get("xform"), c["xform"])))
     if c is None:
-        # not the value-check conjunct: a pendingFix waives a check that exists and fails, never a missing one
         out.append(("(3) value check", "no value check for %s/%s %s" % (kind, lst, r.get("src"))))
     elif not c["holds"]:
-        out.append((VALUE, "value check fails: %s" % c["reason"]))
+        out.append(("value check", "value check fails: %s" % c["reason"]))
     elif c.get("gaps") != []:
-        out.append((VALUE, "value check holds without an explicit empty gaps list: %r" % c.get("gaps")))
+        out.append(("value check", "value check holds without an explicit empty gaps list: %r" % c.get("gaps")))
     elif entry["dataType"] == "INTEGER" and not (isinstance(c.get("maxValue"), int) and
                                                  not isinstance(c["maxValue"], bool) and
                                                  0 <= c["maxValue"] <= reg_mod.INT32_MAX):
@@ -240,43 +233,19 @@ def row_findings(reg, r):
     return out
 
 
-def matched_check(reg, r):
-    """The registry value check of row r (its entry in the row's document, same kind, list and src), or None."""
-    name = r.get("kpm")
-    if not isinstance(name, str):
-        return None
-    entry, _ = reg_mod.match_entry(reg, reg_mod.DOC_FOR_KIND.get(r.get("kind")), name)
-    return None if entry is None else reg_mod.value_check(entry, r.get("kind"), r.get("list"), r.get("src"))
-
-
-def strict(doc, reg, require_no_pending=False):
-    """(findings, xfails, failing row tags) of the clause checks."""
-    errs, xfails, failing = [], [], []
+def strict(doc, reg):
+    """(findings, failing row tags) of the clause checks."""
+    errs, failing = [], []
     for r in doc.get("rows", []):
         tag = "%s/%s/%s/%s" % (r.get("kind"), r.get("list"), r.get("order"), r.get("kpm"))
         got = row_findings(reg, r)
-        pend = r.get("pendingFix")
-        if pend is not None:
-            key = (r.get("kind"), r.get("list"), r.get("kpm"))
-            if require_no_pending:
-                got.append(("(8) pending", "pendingFix %s is set (--require-no-pending)" % pend))
-            elif PENDING_ALLOWED.get(key) != pend:
-                got.append(("(8) pending", "pendingFix %r is not allowed on this row" % pend))
-            else:
-                chk = matched_check(reg, r)
-                if chk is not None and chk["holds"] is True:
-                    got.append(("(8) pending", "pendingFix %s is stale: the row's value check holds; remove the "
-                                               "marker" % pend))
-                elif not got:
-                    got.append(("(8) pending", "pendingFix %s row passes: remove the marker" % pend))
-                elif (all(c == VALUE for c, _ in got) and chk is not None and chk["holds"] is False and
-                      chk["xform"] == r.get("xform")):
-                    xfails += ["%s: expected failure pending %s: %s" % (tag, pend, m) for _, m in got]
-                    continue
+        if "pendingFix" in r:
+            got.append(("(8) pending", "pendingFix %r: no finding is waived, the row passes or fails on its own "
+                                       "checks" % (r["pendingFix"],)))
         if got:
             failing.append(tag)
             errs += ["%s: %s: %s" % (tag, c, m) for c, m in got]
-    return errs, xfails, failing
+    return errs, failing
 
 
 # the JSON type of every row field the checks read (None in a tuple = JSON null); a missing field is lint()'s finding
@@ -309,18 +278,18 @@ def map_findings(doc):
     return errs
 
 
-def evaluate(doc, reg, require_no_pending=False):
-    """(findings, xfails, failing row tags) of the map, structural, registry and clause checks. The structural and
+def evaluate(doc, reg):
+    """(findings, failing row tags) of the map, structural, registry and clause checks. The structural and
     clause checks traverse the map, so they run only when its containers and row types are sound; the clause checks
     read the registry's fields, so they run only when the registry check finds nothing."""
     map_errs = map_findings(doc)
     reg_errs = reg_mod.check_registry(reg)
     if map_errs:
-        return map_errs + reg_errs + ["map has findings: structural and clause checks skipped"], [], []
+        return map_errs + reg_errs + ["map has findings: structural and clause checks skipped"], []
     if reg_errs:
-        return lint(doc) + reg_errs + ["registry has findings: clause checks skipped"], [], []
-    serrs, xfails, failing = strict(doc, reg, require_no_pending)
-    return lint(doc) + serrs, xfails, failing
+        return lint(doc) + reg_errs + ["registry has findings: clause checks skipped"], []
+    serrs, failing = strict(doc, reg)
+    return lint(doc) + serrs, failing
 
 
 def check_samples(doc, path):
@@ -372,7 +341,6 @@ def main(argv):
         return _load("lint_metric_map_selftest", "lint-metric-map-selftest.py").run(sys.modules[__name__])
     samples, kpimon_enb = take(args, "--samples"), take(args, "--kpimon-enb")
     reg_path = take(args, "--registry") or DEFAULT_REGISTRY
-    no_pending = bool(take(args, "--require-no-pending", False))
     path = args[0] if args else os.path.join(HERE, "..", "schema", "metric-map.v1.json")
     try:
         doc = json.load(open(path))
@@ -380,11 +348,10 @@ def main(argv):
     except (OSError, ValueError) as ex:
         print("FAIL cannot read the map or the registry: %s" % ex)
         return 1
-    errs, xfails, failing = evaluate(doc, reg, no_pending)
+    errs, failing = evaluate(doc, reg)
     sound = not map_findings(doc)  # the extra checks and the summary traverse the rows too
     if sound and samples: errs += check_samples(doc, samples)
     if sound and kpimon_enb: errs += check_kpimon_enb(doc, kpimon_enb)
-    for x in xfails: print("XFAIL", x)
     for e in errs: print("FAIL", e)
     rows = doc["rows"] if sound else []
     n = {}
@@ -393,7 +360,7 @@ def main(argv):
         n[key] = n.get(key, 0) + 1
     print(json.dumps({"map": os.path.basename(path), "registry": os.path.basename(reg_path),
                       "rows": len(rows), "lists": n, "findings": len(errs),
-                      "rowsFailingClauseChecks": len(failing), "pendingExpectedFailures": len(xfails)}))
+                      "rowsFailingClauseChecks": len(failing)}))
     return 1 if errs else 0
 
 
